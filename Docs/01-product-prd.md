@@ -130,9 +130,9 @@ People seeking
 
 # User Personas
 
-## Elena — Independent Explorer
+## Vishnu — Independent Explorer
 
-**Age:** 31
+**Age:** 20
 
 **Profession:** Software Engineer
 
@@ -150,11 +150,11 @@ People seeking
 
 ---
 
-## Mateo — Certified Mountain Guide
+## Skanda — Certified Mountain Guide
 
 **Age:** 45
 
-**Profession:** UIAGM Mountain Guide
+**Profession:** Everest Mountain Guide
 
 ### Goals
 
