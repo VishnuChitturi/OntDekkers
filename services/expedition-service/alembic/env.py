@@ -7,6 +7,18 @@ from alembic import context
 from app.config.settings import settings
 from shared import Base
 
+# ---------------------------------------------------------------------------
+# CRITICAL: Import all ORM models so they register against Base.metadata
+# before target_metadata is assigned below.
+#
+# Without this import, Base.metadata contains zero tables and Alembic
+# autogenerate produces a completely empty migration.
+#
+# app/models/__init__.py imports every model module in dependency order,
+# so importing the package is sufficient to register all 7 tables.
+# ---------------------------------------------------------------------------
+import app.models  # noqa: F401  — side-effect import, must not be removed
+
 # Alembic Config object
 config = context.config
 

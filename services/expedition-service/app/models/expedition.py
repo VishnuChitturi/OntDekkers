@@ -10,6 +10,7 @@ Table:    expeditions
 """
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 from enum import Enum as PyEnum
@@ -134,12 +135,12 @@ class Expedition(Base, AuditMixin, SoftDeleteMixin):
     # ------------------------------------------------------------------
     # Dates and capacity
     # ------------------------------------------------------------------
-    start_date: Mapped[Optional[str]] = mapped_column(
+    start_date: Mapped[Optional[date]] = mapped_column(
         Date,
         nullable=True,
         comment="Planned departure date (UTC date).",
     )
-    end_date: Mapped[Optional[str]] = mapped_column(
+    end_date: Mapped[Optional[date]] = mapped_column(
         Date,
         nullable=True,
         comment="Planned return date (UTC date).",

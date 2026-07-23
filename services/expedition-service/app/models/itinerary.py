@@ -12,7 +12,6 @@ Table:    expedition_itinerary
 
 import uuid
 from datetime import time
-from enum import Enum as PyEnum
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
