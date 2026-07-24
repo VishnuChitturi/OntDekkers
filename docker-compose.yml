@@ -1,18 +1,53 @@
 services:
   traefik:
     image: traefik:v2.10
+    # Static configuration is loaded from platform/gateway/traefik.yml.
+    # Dynamic routing rules (routers/services/middlewares) live in
+    # platform/gateway/dynamic.yml and are watched for hot-reload.
+    #
+    # File provider is used instead of Docker provider because Docker Desktop
+    # on macOS does not reliably expose a connectable Docker socket inside
+    # containers (bind-mounted socket cannot be opened from within the VM).
+    #
+    # Routing contract (team_guidelines.md — /api/v1/{service-name}/* standard):
+    #   http://localhost/api/v1/authentication/* → authentication-service:8000
+    #   http://localhost/api/v1/user/*           → user-service:8000
+    volumes:
+      - ./platform/gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./platform/gateway/dynamic.yml:/etc/traefik/dynamic.yml:ro
     ports:
       - "80:80"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      # default: reach authentication-service and user-service by hostname
+      - default
+      # ontdekker-gateway: dedicated gateway network (for future Docker provider use)
+      - ontdekker-gateway
 
   postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+    # Host port binding removed to avoid conflicts when another PostgreSQL
+    # instance is running locally (e.g., for other projects).
+    # Services inside the Compose network reach postgres via hostname 'postgres'.
+    # For local Alembic/psql access outside Docker, temporarily re-add:
+    #   ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # init.sql runs ONLY on first volume initialization (empty data dir).
+      # If a postgres_data volume already exists, this script will NOT re-run.
+      # To apply it to an existing volume, remove the volume first:
+      #   docker compose down && docker volume rm <project>_postgres_data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # pg_isready ships with postgres:16 — no extra tools required.
+      # -U postgres matches POSTGRES_USER above.
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7
@@ -50,6 +85,133 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    # NOTE: The minio/minio image does not ship curl, wget, or mc.
+    # A reliable HTTP-based healthcheck is therefore not possible without
+    # adding an external tool to the image. The user-service relies on
+    # init_minio() in its lifespan startup, which is idempotent and will
+    # fail fast with a clear S3Error if MinIO is not yet ready.
+    # depends_on: minio (without condition) ensures the container has started
+    # before user-service begins its startup sequence.
+
+  # ---------------------------------------------------------------------------
+  # Authentication Service
+  # ---------------------------------------------------------------------------
+  # Build context is the repository root so the Dockerfile can COPY both
+  # shared/ and services/authentication-service/ in a single build context.
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8000: retained for Phase 1 direct access while Traefik is
+  #   being validated. Phase 2 will remove this host binding.
+  # Gateway routing (team_guidelines.md — /api/v1/{service-name}/* standard):
+  #   External:  http://localhost/api/v1/authentication/*
+  #   Traefik strips /api/v1/authentication, forwards to /auth/* on port 8000
+  #   (FastAPI router is mounted at prefix="/auth")
+  #   Routing rules live in platform/gateway/dynamic.yml (file provider).
+  # ---------------------------------------------------------------------------
+  authentication-service:
+    build:
+      context: .
+      dockerfile: services/authentication-service/Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      # default: reach postgres, redis, kafka (internal infrastructure)
+      - default
+      # ontdekker-gateway: shared with Traefik for gateway routing
+      - ontdekker-gateway
+    environment:
+      # Database — postgres is the Docker Compose service hostname.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/auth_db
+      # JWT — override the CommonSettings default with a real development secret.
+      # Replace with a strong random value in any non-local environment.
+      JWT_SECRET: dev_secret_key_replace_this_in_production
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      # Infrastructure hostnames inside the Compose network
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_URL: kafka:29092
+      ENVIRONMENT: development
+      # CORS — allow the local Next.js dev server
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Run Alembic migrations before starting Uvicorn.
+    # Migration failure (non-zero exit) prevents Uvicorn from starting.
+    # PYTHONPATH=/app is already set in the Dockerfile; alembic.ini uses
+    # prepend_sys_path=. and the WORKDIR is /app/services/authentication-service,
+    # so both 'app' and 'shared' are importable during migration.
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
+
+  # ---------------------------------------------------------------------------
+  # User Service
+  # ---------------------------------------------------------------------------
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8001: retained for Phase 1 direct access while Traefik is
+  #   being validated. Phase 2 will remove this host binding.
+  # Gateway routing (team_guidelines.md — /api/v1/{service-name}/* standard):
+  #   External:  http://localhost/api/v1/user/*
+  #   Traefik strips /api/v1/user, forwards to /users/* on port 8000
+  #   (FastAPI router is mounted at prefix="/users")
+  #   Routing rules live in platform/gateway/dynamic.yml (file provider).
+  # ---------------------------------------------------------------------------
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    ports:
+      - "8001:8000"
+    networks:
+      # default: reach postgres, redis, kafka, minio (internal infrastructure)
+      - default
+      # ontdekker-gateway: shared with Traefik for gateway routing
+      - ontdekker-gateway
+    environment:
+      # Database — postgres is the Docker Compose service hostname.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      # JWT — must match authentication-service exactly so token validation works.
+      JWT_SECRET: dev_secret_key_replace_this_in_production
+      JWT_ALGORITHM: HS256
+      # Infrastructure hostnames inside the Compose network
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_URL: kafka:29092
+      ENVIRONMENT: development
+      # MinIO — endpoint uses the Compose service hostname, not localhost.
+      # Credentials match MINIO_ROOT_USER / MINIO_ROOT_PASSWORD on the minio service.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_PROFILES: profiles
+      MINIO_MAX_FILE_SIZE: 5242880
+      # CORS — allow the local Next.js dev server
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        # No healthcheck defined on minio (image has no curl/wget/mc).
+        # service_started ensures the container exists before user-service
+        # begins startup. init_minio() in user-service lifespan is idempotent
+        # and will retry / fail fast with a clear error if MinIO is not ready.
+        condition: service_started
+    # Run Alembic migrations before starting Uvicorn.
+    # Migration failure (non-zero exit) prevents Uvicorn from starting.
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
 
 volumes:
+  postgres_data:
   minio_data:
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+# ontdekker-gateway: shared overlay used by Traefik and the microservices it
+# routes. Traefik's Docker provider is configured to discover containers on
+# this network. Services not exposed via Traefik do not need to join it.
+# ---------------------------------------------------------------------------
+networks:
+  ontdekker-gateway:
+    driver: bridge
