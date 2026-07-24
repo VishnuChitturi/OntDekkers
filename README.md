@@ -46,14 +46,17 @@ docker compose up -d --build
 ```
 
 ### Accessing APIs
-Once running, Traefik exposes microservices on port `80`. Exposed endpoints are routed using prefix matching:
-- Authentication API: `http://localhost/auth`
-- User Profile API: `http://localhost/users`
-- Discover Feed API: `http://localhost/feed`
-- Community API: `http://localhost/communities`
-- Expedition API: `http://localhost/expeditions`
-- Guide API: `http://localhost/guides`
-- Chat API: `http://localhost/chat`
+Once running, Traefik exposes microservices on port `80` using the `/api/v1/{service-name}/*` prefix standard (see [Team Guidelines](Docs/team_guidelines.md)):
+- Authentication API: `http://localhost/api/v1/authentication/*`
+- User Profile API: `http://localhost/api/v1/user/*`
+- Discover Feed API: `http://localhost/api/v1/feed/*` *(Dev 2)*
+- Community API: `http://localhost/api/v1/communities/*` *(Dev 2)*
+- Expedition API: `http://localhost/api/v1/expeditions/*` *(Dev 3)*
+- Guide API: `http://localhost/api/v1/guides/*` *(Dev 3)*
+- Chat API: `http://localhost/api/v1/chat/*` *(Shared)*
+
+> **Direct service ports** (Phase 1 only, while Traefik is being validated):
+> Authentication Service: `http://localhost:8000/auth/*` · User Service: `http://localhost:8001/users/*`
 
 ---
 
@@ -66,4 +69,4 @@ OntDekker follows a **GitFlow Branching Strategy** to enable parallel developmen
 3. **`feature/*`:** Developer branch. Branches are named `feature/<service-name>-<brief-desc>` (e.g. `feature/auth-jwt-refresh`).
 4. **`hotfix/*`:** Hotfixes for production. Branches branch from `main` and merge to both `main` and `develop`.
 
-*Refer to the full [Team Guidelines](file:///Users/vishnu/Desktop/OntDekkers/docs/team_guidelines.md) for Pull Request templates, review checklists, and the Definition of Done.*
+*Refer to the full [Team Guidelines](Docs/team_guidelines.md) for Pull Request templates, review checklists, and the Definition of Done.*
