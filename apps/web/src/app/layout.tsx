@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { AppStateProvider } from "@/contexts/AppStateProvider";
+import { RouterProvider } from "@/router/Router";
 
 // ---------------------------------------------------------------------------
 // Fonts — loaded via next/font for zero layout shift and self-hosting
@@ -54,7 +56,16 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-canvas antialiased">
-        {children}
+        {/*
+         * AppStateProvider wraps the entire tree so any component can access
+         * global application state via useAppState().
+         *
+         * RouterProvider drives the virtual navigation model — all view
+         * transitions happen inside here without browser page reloads.
+         */}
+        <AppStateProvider>
+          <RouterProvider>{children}</RouterProvider>
+        </AppStateProvider>
       </body>
     </html>
   );
