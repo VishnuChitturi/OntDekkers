@@ -35,9 +35,11 @@ export function LogoutButton({ className }: LogoutButtonProps) {
     setLoading(true);
     try {
       await logout();
+    } catch {
+      // Remote revocation failure is non-fatal.
+      // AuthContext.logout() already clears all local state regardless.
     } finally {
       // Navigate to login whether or not the remote revocation succeeded.
-      // AuthContext.logout() always clears local state on failure too.
       setLoading(false);
       router.replace("/login");
     }
