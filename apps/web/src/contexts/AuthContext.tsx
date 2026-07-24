@@ -12,11 +12,14 @@
  * On mount: reads refresh_token from localStorage, calls POST /auth/refresh,
  * then calls GET /auth/me to restore the session. Clears stale tokens on failure.
  *
+ * Endpoint calls are delegated to src/services/auth.ts typed functions.
+ * This file does not construct endpoint paths or HTTP verbs directly.
+ *
  * Does NOT:
  *   - Decode JWT payload client-side as a substitute for /auth/me
  *   - Implement automatic Axios 401 retry (belongs in a later interceptor layer)
  *   - Log tokens or Authorization header values
- *   - Import or modify the Axios transport layer directly (uses authHttp)
+ *   - Import or call authHttp directly (delegated to auth service)
  */
 
 import React, {
@@ -27,37 +30,25 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { authHttp, setAccessToken } from "@/services/api";
+import { setAccessToken } from "@/services/api";
+import {
+  getMe,
+  login as authLogin,
+  logout as authLogout,
+  refresh as authRefresh,
+  type UserIdentityResponse,
+} from "@/services/auth";
 
 // ---------------------------------------------------------------------------
-// Types — match backend Authentication Service schemas
+// Types
 // ---------------------------------------------------------------------------
 
-export interface AuthUser {
-  id: string;
-  email: string;
-  is_verified: boolean;
-  is_active: boolean;
-  roles: string[];
-  created_at: string;
-}
+/** The authenticated user identity as returned by /auth/me. */
+export type AuthUser = UserIdentityResponse;
 
 interface LoginCredentials {
   email: string;
   password: string;
-}
-
-interface LoginResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-}
-
-interface AccessTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,27 +96,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Guard against concurrent initialisation (React StrictMode mounts twice)
   const initialising = useRef(false);
 
-  /** Fetch the current authenticated user identity from GET /auth/me. */
-  const fetchUser = useCallback(async (): Promise<AuthUser> => {
-    const response = await authHttp.get<AuthUser>("/auth/me");
-    return response.data;
-  }, []);
-
   /** Attempt to restore a session from a stored refresh token on app load. */
   const restoreSession = useCallback(async (): Promise<void> => {
     const storedRefresh = getStoredRefreshToken();
     if (!storedRefresh) return;
 
     try {
-      const response = await authHttp.post<AccessTokenResponse>(
-        "/auth/refresh",
-        { refresh_token: storedRefresh }
-      );
+      // Exchange stored refresh token for a new access token
+      const tokenData = await authRefresh({ refresh_token: storedRefresh });
+
       // Set in-memory access token — never log it
-      setAccessToken(response.data.access_token);
+      setAccessToken(tokenData.access_token);
 
       // Load user identity from /auth/me (do not decode JWT client-side)
-      const authUser = await fetchUser();
+      const authUser = await getMe();
       setUser(authUser);
     } catch {
       // Refresh token is invalid or expired — clear stale state silently
@@ -133,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAccessToken(null);
       setUser(null);
     }
-  }, [fetchUser]);
+  }, []);
 
   // Run session restoration once on mount
   useEffect(() => {
@@ -151,24 +135,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async ({ email, password }: LoginCredentials): Promise<void> => {
-      const response = await authHttp.post<LoginResponse>("/auth/login", {
-        email,
-        password,
-      });
-
-      const { access_token, refresh_token } = response.data;
+      const tokenData = await authLogin({ email, password });
 
       // Persist refresh token (localStorage — Phase 1 strategy)
-      storeRefreshToken(refresh_token);
+      storeRefreshToken(tokenData.refresh_token);
 
       // Keep access token in memory only
-      setAccessToken(access_token);
+      setAccessToken(tokenData.access_token);
 
       // Fetch and store authenticated user identity
-      const authUser = await fetchUser();
+      const authUser = await getMe();
       setUser(authUser);
     },
-    [fetchUser]
+    []
   );
 
   // ---------------------------------------------------------------------------
@@ -181,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Attempt to revoke the refresh token on the backend
     if (storedRefresh) {
       try {
-        await authHttp.post("/auth/logout", { refresh_token: storedRefresh });
+        await authLogout({ refresh_token: storedRefresh });
       } catch {
         // Remote logout failure is non-fatal — always clear local state
       }
