@@ -47,3 +47,31 @@ services:
       - "9000:9000"
       - "9001:9001"
     command: server /data --console-address ":9001"
+
+  expedition-service:
+    build:
+      context: .
+      dockerfile: services/expedition-service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      - postgres
+    restart: on-failure
+
+  guide-service:
+    build:
+      context: .
+      dockerfile: services/guide-service/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/guide_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      - postgres
+    restart: on-failure
