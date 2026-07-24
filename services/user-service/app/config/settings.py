@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from typing import List
 from shared.config import CommonSettings
 
 
@@ -17,6 +18,9 @@ class Settings(CommonSettings):
     MINIO_BUCKET_PROFILES: str = "profiles"
     # Max upload size in bytes (5 MB)
     MINIO_MAX_FILE_SIZE: int = 5 * 1024 * 1024
+    # CORS — comma-separated list of allowed origins.
+    # Default permits the Next.js local development server.
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
 
     class Config:
         env_file = ".env"
