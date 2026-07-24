@@ -134,13 +134,13 @@ def upgrade() -> None:
 
         # Enums
         sa.Column("status",
-                  sa.Enum("DRAFT", "PUBLISHED", "ACTIVE", "COMPLETED",
-                          "CANCELLED", "ARCHIVED",
-                          name="expedition_status_enum", create_type=False),
+                  postgresql.ENUM("DRAFT", "PUBLISHED", "ACTIVE", "COMPLETED",
+                                  "CANCELLED", "ARCHIVED",
+                                  name="expedition_status_enum", create_type=False),
                   nullable=False, server_default="DRAFT"),
         sa.Column("visibility",
-                  sa.Enum("PUBLIC", "PRIVATE",
-                          name="expedition_visibility_enum", create_type=False),
+                  postgresql.ENUM("PUBLIC", "PRIVATE",
+                                  name="expedition_visibility_enum", create_type=False),
                   nullable=False, server_default="PUBLIC"),
 
         # Media
@@ -186,12 +186,12 @@ def upgrade() -> None:
                   comment="UUID ref to user_db.user_profiles. NOT a SQL FK."),
 
         sa.Column("role",
-                  sa.Enum("ORGANIZER", "CO_ORGANIZER", "PARTICIPANT",
-                          name="participant_role_enum", create_type=False),
+                  postgresql.ENUM("ORGANIZER", "CO_ORGANIZER", "PARTICIPANT",
+                                  name="participant_role_enum", create_type=False),
                   nullable=False, server_default="PARTICIPANT"),
         sa.Column("status",
-                  sa.Enum("ACTIVE", "LEFT", "REMOVED",
-                          name="participant_status_enum", create_type=False),
+                  postgresql.ENUM("ACTIVE", "LEFT", "REMOVED",
+                                  name="participant_status_enum", create_type=False),
                   nullable=False, server_default="ACTIVE"),
 
         sa.Column("joined_at",   sa.DateTime(timezone=True), nullable=False,
@@ -233,8 +233,8 @@ def upgrade() -> None:
 
         sa.Column("message", sa.Text, nullable=True),
         sa.Column("status",
-                  sa.Enum("PENDING", "APPROVED", "REJECTED", "CANCELLED",
-                          name="join_request_status_enum", create_type=False),
+                  postgresql.ENUM("PENDING", "APPROVED", "REJECTED", "CANCELLED",
+                                  name="join_request_status_enum", create_type=False),
                   nullable=False, server_default="PENDING"),
 
         # Review audit fields
@@ -341,8 +341,8 @@ def upgrade() -> None:
 
         sa.Column("name",     sa.String(200), nullable=False),
         sa.Column("category",
-                  sa.Enum("BASE_PACK", "CONSUMABLES", "WORN_GEAR",
-                          name="gear_category_enum", create_type=False),
+                  postgresql.ENUM("BASE_PACK", "CONSUMABLES", "WORN_GEAR",
+                                  name="gear_category_enum", create_type=False),
                   nullable=False, server_default="BASE_PACK"),
         sa.Column("weight_grams", sa.Integer, nullable=False, server_default="0"),
         sa.Column("quantity",     sa.Integer, nullable=False, server_default="1"),

@@ -1,5 +1,4 @@
 import asyncio
-from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
@@ -22,9 +21,11 @@ import app.models  # noqa: F401  — side-effect import, must not be removed
 # Alembic Config object
 config = context.config
 
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# NOTE: We do NOT call fileConfig() here. The project uses
+# shared.logging.setup_logging() for structured JSON logging.
+# The minimal alembic.ini does not contain the [loggers]/[handlers]/
+# [formatters] sections that fileConfig() requires, and Alembic
+# falls back to Python's default logging without it.
 
 target_metadata = Base.metadata
 
