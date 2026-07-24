@@ -48,6 +48,37 @@ async def get_current_user(
     except JWTError:
         raise UnauthorizedException("Invalid or expired authentication token.")
 
+
+async def get_optional_current_user(
+    authorization: Optional[str] = Header(None),
+) -> Optional[Dict[str, Any]]:
+    """
+    Optional JWT authentication dependency.
+
+    Returns the validated JWT payload when a valid Bearer token is present.
+    Returns None when:
+      - No Authorization header is provided (unauthenticated public request)
+      - The Authorization header is present but the token is invalid/expired
+        (silently degrades — the endpoint remains accessible)
+
+    Use this for endpoints that are publicly accessible but provide additional
+    viewer-specific context when the caller is authenticated (e.g. is_following,
+    is_own_profile on a public profile response).
+
+    Never raises — unauthenticated callers always receive None.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+
+    token = authorization.split(" ")[1]
+    settings = get_common_settings()
+    try:
+        payload = decode_jwt_token(token, settings.JWT_SECRET, settings.JWT_ALGORITHM)
+        return payload
+    except JWTError:
+        # Invalid or expired token on a public endpoint — degrade gracefully
+        return None
+
 def require_role(required_role: str):
     async def role_checker(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
         user_roles = current_user.get("roles", [])
