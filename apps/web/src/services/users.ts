@@ -97,6 +97,18 @@ export interface PublicProfileResponse {
   badges: BadgeResponse[];
   reputation: ReputationResponse | null;
   created_at: string;
+  /**
+   * True when the authenticated viewer IS the profile owner.
+   * When True, the Follow/Unfollow button must be suppressed.
+   * Defaults to false for unauthenticated viewers.
+   */
+  is_own_profile: boolean;
+  /**
+   * True when the authenticated viewer already follows this profile.
+   * Only meaningful when is_own_profile is false.
+   * Defaults to false for unauthenticated viewers.
+   */
+  is_following: boolean;
 }
 
 export interface UpdateProfileRequest {

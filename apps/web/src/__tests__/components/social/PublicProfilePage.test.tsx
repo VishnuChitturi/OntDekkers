@@ -7,6 +7,8 @@
  * PublicProfilePage uses:
  *   - useParams() to read the `username` route segment
  *   - useQuery() (@tanstack/react-query) to call getPublicProfile(username)
+ *   - useMutation() to call followUser / unfollowUser
+ *   - useQueryClient() to invalidate the profile query after follow/unfollow
  *
  * Coverage:
  *   1. Loading (skeleton) state
@@ -17,11 +19,11 @@
  *   6. 404 / not-found state
  *   7. Generic error state
  *   8. Private data is NOT exposed in the rendered output
- *   9. Follow/unfollow UI is NOT present (deferred — backend contract)
+ *   9. Follow/Unfollow UI — Checkpoint 22.5 viewer-context behavior
  *
  * Mocks:
  *   - next/navigation useParams
- *   - @/services/users getPublicProfile (service boundary)
+ *   - @/services/users getPublicProfile, followUser, unfollowUser (service boundary)
  *   - next/image (plain <img> shim)
  *
  * No MSW / no network calls needed.
@@ -30,6 +32,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import PublicProfilePage from "@/app/users/[username]/page";
 import type { PublicProfileResponse } from "@/services/users";
@@ -64,17 +67,23 @@ vi.mock("next/image", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock getPublicProfile at the service boundary
+// Mock getPublicProfile, followUser, unfollowUser at the service boundary
 // ---------------------------------------------------------------------------
 
 const mockGetPublicProfile = vi.fn<
   [string],
   Promise<PublicProfileResponse>
 >();
+const mockFollowUser = vi.fn<[string], Promise<{ message: string }>>();
+const mockUnfollowUser = vi.fn<[string], Promise<{ message: string }>>();
 
 vi.mock("@/services/users", () => ({
   getPublicProfile: (...args: unknown[]) =>
     mockGetPublicProfile(...(args as [string])),
+  followUser: (...args: unknown[]) =>
+    mockFollowUser(...(args as [string])),
+  unfollowUser: (...args: unknown[]) =>
+    mockUnfollowUser(...(args as [string])),
 }));
 
 // ---------------------------------------------------------------------------
@@ -122,6 +131,8 @@ const BASE_PROFILE: PublicProfileResponse = {
   badges: [],
   reputation: null,
   created_at: "2025-03-15T09:00:00Z",
+  is_own_profile: false,
+  is_following: false,
 };
 
 const FULL_PROFILE: PublicProfileResponse = {
@@ -158,6 +169,9 @@ const FULL_PROFILE: PublicProfileResponse = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockParamsUsername.mockReturnValue("explorer42");
+  // Default follow/unfollow to resolve successfully
+  mockFollowUser.mockResolvedValue({ message: "Followed successfully." });
+  mockUnfollowUser.mockResolvedValue({ message: "Unfollowed successfully." });
 });
 
 // ---------------------------------------------------------------------------
@@ -532,12 +546,84 @@ describe("PublicProfilePage — private data not exposed", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 9. Follow/unfollow UI is NOT present (deferred)
+// 9. Follow/Unfollow UI — Checkpoint 22.5 viewer-context behavior
 // ---------------------------------------------------------------------------
 
-describe("PublicProfilePage — follow/unfollow deferred", () => {
-  it("does not render a Follow button", async () => {
-    mockGetPublicProfile.mockResolvedValue(BASE_PROFILE);
+describe("PublicProfilePage — Follow button (not following)", () => {
+  it("shows a Follow button when is_own_profile=false and is_following=false", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /follow anya kowalski/i });
+
+    expect(
+      screen.getByRole("button", { name: /follow anya kowalski/i })
+    ).toBeInTheDocument();
+  });
+
+  it("does not show an Unfollow button when is_following=false", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /follow anya kowalski/i });
+
+    expect(
+      screen.queryByRole("button", { name: /unfollow/i })
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("PublicProfilePage — Unfollow button (already following)", () => {
+  it("shows an Unfollow button when is_own_profile=false and is_following=true", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: true,
+    });
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /unfollow anya kowalski/i });
+
+    expect(
+      screen.getByRole("button", { name: /unfollow anya kowalski/i })
+    ).toBeInTheDocument();
+  });
+
+  it("does not show a Follow button when is_following=true", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: true,
+    });
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /unfollow anya kowalski/i });
+
+    expect(
+      screen.queryByRole("button", { name: /^follow anya kowalski$/i })
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("PublicProfilePage — own profile (no Follow/Unfollow)", () => {
+  it("does not render a Follow button when is_own_profile=true", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: true,
+      is_following: false,
+    });
 
     renderPage();
 
@@ -548,8 +634,12 @@ describe("PublicProfilePage — follow/unfollow deferred", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not render an Unfollow button", async () => {
-    mockGetPublicProfile.mockResolvedValue(BASE_PROFILE);
+  it("does not render an Unfollow button when is_own_profile=true", async () => {
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: true,
+      is_following: false,
+    });
 
     renderPage();
 
@@ -558,5 +648,255 @@ describe("PublicProfilePage — follow/unfollow deferred", () => {
     expect(
       screen.queryByRole("button", { name: /unfollow/i })
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("PublicProfilePage — unauthenticated viewer (default false fields)", () => {
+  it("shows a Follow button when both is_own_profile and is_following are false (unauthenticated defaults)", async () => {
+    // Server returns defaults for unauthenticated viewer
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /follow anya kowalski/i });
+
+    expect(
+      screen.getByRole("button", { name: /follow anya kowalski/i })
+    ).toBeInTheDocument();
+  });
+});
+
+describe("PublicProfilePage — successful Follow", () => {
+  it("calls followUser with the profile id when Follow is clicked", async () => {
+    const user = userEvent.setup();
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    const followBtn = await screen.findByRole("button", {
+      name: /follow anya kowalski/i,
+    });
+    await user.click(followBtn);
+
+    await waitFor(() => {
+      expect(mockFollowUser).toHaveBeenCalledWith("profile-id-001");
+    });
+  });
+
+  it("invalidates the profile query after successful follow (triggering refetch)", async () => {
+    const user = userEvent.setup();
+    // First call: not following; second call (after invalidation): following
+    mockGetPublicProfile
+      .mockResolvedValueOnce({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: false,
+      })
+      .mockResolvedValue({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: true,
+        follower_count: 129,
+      });
+
+    renderPage();
+
+    const followBtn = await screen.findByRole("button", {
+      name: /follow anya kowalski/i,
+    });
+    await user.click(followBtn);
+
+    // After mutation success + query invalidation, the Unfollow button should appear
+    await screen.findByRole("button", { name: /unfollow anya kowalski/i });
+
+    expect(
+      screen.getByRole("button", { name: /unfollow anya kowalski/i })
+    ).toBeInTheDocument();
+  });
+
+  it("shows updated follower_count after successful follow refetch", async () => {
+    const user = userEvent.setup();
+    mockGetPublicProfile
+      .mockResolvedValueOnce({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: false,
+        follower_count: 128,
+      })
+      .mockResolvedValue({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: true,
+        follower_count: 129,
+      });
+
+    renderPage();
+
+    const followBtn = await screen.findByRole("button", {
+      name: /follow anya kowalski/i,
+    });
+    await user.click(followBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("129")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("PublicProfilePage — successful Unfollow", () => {
+  it("calls unfollowUser with the profile id when Unfollow is clicked", async () => {
+    const user = userEvent.setup();
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: true,
+    });
+
+    renderPage();
+
+    const unfollowBtn = await screen.findByRole("button", {
+      name: /unfollow anya kowalski/i,
+    });
+    await user.click(unfollowBtn);
+
+    await waitFor(() => {
+      expect(mockUnfollowUser).toHaveBeenCalledWith("profile-id-001");
+    });
+  });
+
+  it("invalidates the profile query after successful unfollow", async () => {
+    const user = userEvent.setup();
+    mockGetPublicProfile
+      .mockResolvedValueOnce({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: true,
+        follower_count: 128,
+      })
+      .mockResolvedValue({
+        ...BASE_PROFILE,
+        is_own_profile: false,
+        is_following: false,
+        follower_count: 127,
+      });
+
+    renderPage();
+
+    const unfollowBtn = await screen.findByRole("button", {
+      name: /unfollow anya kowalski/i,
+    });
+    await user.click(unfollowBtn);
+
+    await screen.findByRole("button", { name: /follow anya kowalski/i });
+
+    expect(
+      screen.getByRole("button", { name: /follow anya kowalski/i })
+    ).toBeInTheDocument();
+  });
+});
+
+describe("PublicProfilePage — pending/duplicate-click protection", () => {
+  it("disables the Follow button while mutation is pending", async () => {
+    const user = userEvent.setup();
+    // Never resolves — keeps mutation in pending state
+    mockFollowUser.mockImplementation(() => new Promise(() => {}));
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    const followBtn = await screen.findByRole("button", {
+      name: /follow anya kowalski/i,
+    });
+    await user.click(followBtn);
+
+    // Button should be disabled immediately after click
+    await waitFor(() => {
+      expect(followBtn).toBeDisabled();
+    });
+  });
+
+  it("disables the Unfollow button while mutation is pending", async () => {
+    const user = userEvent.setup();
+    mockUnfollowUser.mockImplementation(() => new Promise(() => {}));
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: true,
+    });
+
+    renderPage();
+
+    const unfollowBtn = await screen.findByRole("button", {
+      name: /unfollow anya kowalski/i,
+    });
+    await user.click(unfollowBtn);
+
+    await waitFor(() => {
+      expect(unfollowBtn).toBeDisabled();
+    });
+  });
+});
+
+describe("PublicProfilePage — Follow/Unfollow API error handling", () => {
+  it("shows an error message when followUser fails", async () => {
+    const user = userEvent.setup();
+    mockFollowUser.mockRejectedValue(
+      new ApiError(500, {
+        success: false,
+        message: "Internal server error",
+        code: "INTERNAL_ERROR",
+      })
+    );
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: false,
+    });
+
+    renderPage();
+
+    const followBtn = await screen.findByRole("button", {
+      name: /follow anya kowalski/i,
+    });
+    await user.click(followBtn);
+
+    await screen.findByRole("alert");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/internal server error/i);
+  });
+
+  it("shows a generic error message when unfollowUser fails with a non-ApiError", async () => {
+    const user = userEvent.setup();
+    mockUnfollowUser.mockRejectedValue(new Error("Network timeout"));
+    mockGetPublicProfile.mockResolvedValue({
+      ...BASE_PROFILE,
+      is_own_profile: false,
+      is_following: true,
+    });
+
+    renderPage();
+
+    const unfollowBtn = await screen.findByRole("button", {
+      name: /unfollow anya kowalski/i,
+    });
+    await user.click(unfollowBtn);
+
+    await screen.findByRole("alert");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /could not unfollow/i
+    );
   });
 });
