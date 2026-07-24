@@ -1,0 +1,201 @@
+"use client";
+
+/**
+ * /login — Sign In Screen
+ *
+ * Uses AuthContext.login() — does not make direct API calls.
+ *
+ * After successful login:
+ *   - Reads `redirect` query parameter set by ProtectedRoute.
+ *   - Validates the redirect is a safe internal path (starts with /).
+ *   - Falls back to / if the redirect is absent or unsafe.
+ *
+ * useSearchParams() is isolated in a child component wrapped in Suspense,
+ * as required by Next.js App Router for static page generation.
+ *
+ * Backend contract: email + password via auth service login().
+ * Errors are displayed from normalized ApiError.message.
+ */
+
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Loader2 } from "lucide-react";
+import { AuthCard } from "@/components/auth/AuthCard";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
+import { ApiError } from "@/services/api";
+
+/** Only allow redirects to same-origin relative paths. */
+function getSafeRedirect(raw: string | null): string {
+  if (!raw) return "/";
+  const decoded = decodeURIComponent(raw);
+  // Must be a relative path starting with / and not //
+  if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
+  return "/";
+}
+
+function LoginForm() {
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const justRegistered = searchParams.get("registered") === "1";
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Redirect already-authenticated users away from the login screen
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      const redirectTo = getSafeRedirect(searchParams.get("redirect"));
+      router.replace(redirectTo);
+    }
+  }, [isAuthenticated, authLoading, router, searchParams]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (!email.trim()) {
+      setError("Email is required.");
+      return;
+    }
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await login({ email: email.trim(), password });
+      const redirectTo = getSafeRedirect(searchParams.get("redirect"));
+      router.replace(redirectTo);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      {/* Post-registration success banner */}
+      {justRegistered && !error && (
+        <div
+          role="status"
+          className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-[#0F5132]"
+        >
+          Account created. Sign in to continue.
+        </div>
+      )}
+
+      {/* Error banner */}
+      {error && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Email */}
+      <div className="space-y-1.5">
+        <label
+          htmlFor="email"
+          className="block text-sm font-medium text-[#111111]"
+        >
+          Email
+        </label>
+        <input
+          id="email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={submitting}
+          placeholder="you@example.com"
+          className="w-full rounded-lg border border-[#EAE7DF] bg-white px-3.5 py-2.5 text-sm text-[#111111] placeholder:text-gray-400 outline-none transition focus:border-[#111111] focus:ring-2 focus:ring-[#111111]/10 disabled:opacity-50"
+        />
+      </div>
+
+      {/* Password */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="password"
+            className="block text-sm font-medium text-[#111111]"
+          >
+            Password
+          </label>
+          <Link
+            href="/forgot-password"
+            className="text-sm text-gray-500 underline-offset-4 hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
+        <input
+          id="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={submitting}
+          placeholder="••••••••"
+          className="w-full rounded-lg border border-[#EAE7DF] bg-white px-3.5 py-2.5 text-sm text-[#111111] placeholder:text-gray-400 outline-none transition focus:border-[#111111] focus:ring-2 focus:ring-[#111111]/10 disabled:opacity-50"
+        />
+      </div>
+
+      {/* Submit */}
+      <Button
+        type="submit"
+        disabled={submitting}
+        className="w-full"
+        size="lg"
+      >
+        {submitting ? (
+          <>
+            <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+            Signing in…
+          </>
+        ) : (
+          "Sign in"
+        )}
+      </Button>
+
+      {/* Register link */}
+      <p className="text-center text-sm text-gray-500">
+        Don&apos;t have an account?{" "}
+        <Link
+          href="/register"
+          className="font-medium text-[#111111] underline-offset-4 hover:underline"
+        >
+          Create one
+        </Link>
+      </p>
+    </form>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <AuthCard
+      title="Sign in"
+      description="Welcome back. Enter your credentials to continue."
+    >
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
+    </AuthCard>
+  );
+}
