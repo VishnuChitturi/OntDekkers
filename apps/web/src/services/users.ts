@@ -9,10 +9,6 @@
  *   - Auto-attaches Bearer token when available
  *   - Normalizes backend error envelopes to ApiError
  *
- * Deferred (out of scope for this checkpoint):
- *   - POST /users/me/avatar — multipart avatar upload
- *   - POST /users/me/cover  — multipart cover upload
- *
  * Does NOT:
  *   - Store tokens (AuthContext responsibility)
  *   - Log sensitive values
@@ -147,6 +143,27 @@ export interface PaginatedFollowersResponse {
 export interface MessageResponse {
   message: string;
 }
+
+export interface MediaUploadResponse {
+  /** MinIO object name (internal path — do not expose to users) */
+  object_name: string;
+  /** Short-lived presigned URL to display the uploaded image */
+  presigned_url: string;
+  message: string;
+}
+
+/**
+ * Accepted MIME types for avatar and cover image uploads.
+ * Must match backend ALLOWED_MIME_TYPES in schemas/user.py.
+ */
+export const UPLOAD_ACCEPTED_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+/** Maximum upload size in bytes matching backend MINIO_MAX_FILE_SIZE (5 MB). */
+export const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // API Functions
@@ -356,6 +373,54 @@ export async function getReputation(
 ): Promise<ReputationResponse> {
   const response = await userHttp.get<ReputationResponse>(
     `/users/${userId}/reputation`
+  );
+  return response.data;
+}
+
+/**
+ * POST /users/me/avatar
+ *
+ * Upload a new avatar image for the authenticated user.
+ * Accepted types: JPEG, PNG, WebP — max 5 MB.
+ *
+ * The file is sent as multipart/form-data with field name "file".
+ * Do NOT manually set Content-Type — Axios/browser sets the
+ * multipart boundary automatically.
+ *
+ * Returns a presigned URL to display the uploaded image.
+ */
+export async function uploadAvatar(
+  file: File
+): Promise<MediaUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await userHttp.post<MediaUploadResponse>(
+    "/users/me/avatar",
+    form
+  );
+  return response.data;
+}
+
+/**
+ * POST /users/me/cover
+ *
+ * Upload a new cover image for the authenticated user.
+ * Accepted types: JPEG, PNG, WebP — max 5 MB.
+ *
+ * The file is sent as multipart/form-data with field name "file".
+ * Do NOT manually set Content-Type — Axios/browser sets the
+ * multipart boundary automatically.
+ *
+ * Returns a presigned URL to display the uploaded image.
+ */
+export async function uploadCover(
+  file: File
+): Promise<MediaUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await userHttp.post<MediaUploadResponse>(
+    "/users/me/cover",
+    form
   );
   return response.data;
 }
