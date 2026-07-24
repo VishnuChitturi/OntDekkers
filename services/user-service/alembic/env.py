@@ -7,6 +7,10 @@ from alembic import context
 from app.config.settings import settings
 from shared import Base
 
+# Import all models so Base.metadata is populated before autogenerate
+# compares against the live database schema.
+import app.models  # noqa: F401 — side-effect import required
+
 # Alembic Config object
 config = context.config
 
