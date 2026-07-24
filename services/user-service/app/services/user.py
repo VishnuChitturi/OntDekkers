@@ -219,7 +219,29 @@ class UserService:
     # Public profile (GET /users/{username})
     # ------------------------------------------------------------------
 
-    async def get_public_profile(self, username: str) -> PublicProfileResponse:
+    async def get_public_profile(
+        self,
+        username: str,
+        viewer_jwt_payload: Optional[Dict[str, Any]] = None,
+    ) -> PublicProfileResponse:
+        """
+        Return the public profile for the given username.
+
+        viewer_jwt_payload: optional decoded JWT payload from the request.
+          When present and valid, the response is enriched with viewer-specific
+          context:
+            - is_own_profile: True when the viewer's auth_user_id matches the
+              profile's auth_user_id (same authenticated user viewing their own page).
+            - is_following: True when the viewer's profile already follows the
+              target profile (checked via FollowerRepository.is_following).
+
+          When None (unauthenticated request or invalid token silently degraded),
+          both fields default to False to preserve the public data boundary.
+
+          auth_user_id is intentionally NOT exposed in PublicProfileResponse.
+          is_own_profile is computed server-side to avoid leaking the internal
+          auth identity to the frontend.
+        """
         profile = await self._profiles.get_by_username(username)
         if profile is None:
             raise NotFoundException(
@@ -230,6 +252,33 @@ class UserService:
         reputation = await self._reputation.get_by_user(profile.id)
         fc = await self._followers.follower_count(profile.id)
         fic = await self._followers.following_count(profile.id)
+
+        # --- Viewer-specific context ----------------------------------------
+        is_own_profile = False
+        is_following = False
+
+        if viewer_jwt_payload is not None:
+            try:
+                viewer_auth_id = _extract_auth_user_id(viewer_jwt_payload)
+            except Exception:
+                # Malformed payload — degrade silently, same as unauthenticated
+                viewer_auth_id = None
+
+            if viewer_auth_id is not None:
+                # is_own_profile: compare auth identity, not profile UUIDs
+                is_own_profile = profile.auth_user_id == viewer_auth_id
+
+                if not is_own_profile:
+                    # is_following: look up viewer's profile then query the
+                    # follow relationship. If the viewer has no profile yet
+                    # (hasn't hit /users/me), they cannot be following anyone.
+                    viewer_profile = await self._profiles.get_by_auth_user_id(viewer_auth_id)
+                    if viewer_profile is not None:
+                        is_following = await self._followers.is_following(
+                            follower_id=viewer_profile.id,
+                            following_id=profile.id,
+                        )
+        # --------------------------------------------------------------------
 
         return PublicProfileResponse(
             id=profile.id,
@@ -245,16 +294,22 @@ class UserService:
             badges=[BadgeResponse.model_validate(b) for b in badges],
             reputation=ReputationResponse.model_validate(reputation) if reputation else None,
             created_at=profile.created_at,
+            is_own_profile=is_own_profile,
+            is_following=is_following,
         )
 
-    async def get_public_profile_by_id(self, profile_id: uuid.UUID) -> PublicProfileResponse:
+    async def get_public_profile_by_id(
+        self,
+        profile_id: uuid.UUID,
+        viewer_jwt_payload: Optional[Dict[str, Any]] = None,
+    ) -> PublicProfileResponse:
         profile = await self._profiles.get_by_id(profile_id)
         if profile is None:
             raise NotFoundException(
                 message="User not found.",
                 error_code="USER_NOT_FOUND",
             )
-        return await self.get_public_profile(profile.username)
+        return await self.get_public_profile(profile.username, viewer_jwt_payload=viewer_jwt_payload)
 
     # ------------------------------------------------------------------
     # Update profile (PUT /users/me)

@@ -31,7 +31,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, status
 
-from app.dependencies.user import get_current_user_payload, get_user_service
+from app.dependencies.user import get_current_user_payload, get_optional_current_user_payload, get_user_service
 from app.schemas.user import (
     BadgeResponse,
     MediaUploadResponse,
@@ -228,10 +228,22 @@ async def unsave_item(
 )
 async def get_public_profile(
     username: str,
+    viewer_payload: Optional[dict] = Depends(get_optional_current_user_payload),
     svc: UserService = Depends(get_user_service),
 ) -> PublicProfileResponse:
-    """Return the public profile for the given username. No authentication required."""
-    return await svc.get_public_profile(username)
+    """
+    Return the public profile for the given username.
+
+    No authentication required — the endpoint is always publicly accessible.
+
+    When a valid Bearer JWT is present the response is enriched with:
+      - is_own_profile: True if the viewer IS the profile owner
+      - is_following:   True if the viewer already follows this profile
+
+    Unauthenticated viewers receive is_own_profile=False, is_following=False.
+    An invalid/expired token is silently ignored (same as unauthenticated).
+    """
+    return await svc.get_public_profile(username, viewer_jwt_payload=viewer_payload)
 
 
 # ---------------------------------------------------------------------------

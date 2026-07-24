@@ -141,7 +141,17 @@ class SavedItemResponse(BaseModel):
 
 
 class PublicProfileResponse(BaseModel):
-    """Returned for GET /users/{username} — public fields only."""
+    """Returned for GET /users/{username} — public fields only.
+
+    Viewer-specific fields (is_following, is_own_profile) default to False
+    for unauthenticated viewers. They are populated by the service layer when
+    a valid Bearer token is present in the request.
+
+    is_own_profile: True when the authenticated viewer IS the profile owner.
+                    When True, the frontend must suppress the Follow/Unfollow button.
+    is_following:   True when the authenticated viewer already follows this profile.
+                    Only meaningful when is_own_profile=False.
+    """
 
     id: uuid.UUID
     username: str
@@ -156,6 +166,9 @@ class PublicProfileResponse(BaseModel):
     badges: List[BadgeResponse] = []
     reputation: Optional[ReputationResponse] = None
     created_at: datetime
+    # Viewer-context fields — safe defaults for unauthenticated access
+    is_following: bool = False
+    is_own_profile: bool = False
     model_config = {"from_attributes": True}
 
 

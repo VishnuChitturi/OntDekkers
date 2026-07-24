@@ -947,6 +947,109 @@ class TestPublicProfile:
         assert pub.username == priv.username
         assert pub.display_name == priv.display_name
 
+    # -----------------------------------------------------------------------
+    # Checkpoint 22.5 — viewer-specific context (is_following, is_own_profile)
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_viewer_gets_default_false_fields(self, db_session):
+        """No viewer payload → is_own_profile=False, is_following=False."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=None)
+
+        assert pub.is_own_profile is False
+        assert pub.is_following is False
+
+    @pytest.mark.asyncio
+    async def test_own_profile_sets_is_own_profile_true(self, db_session):
+        """Owner viewing their own profile → is_own_profile=True, is_following=False."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=owner_payload)
+
+        assert pub.is_own_profile is True
+        assert pub.is_following is False  # Cannot follow yourself
+
+    @pytest.mark.asyncio
+    async def test_is_following_true_when_viewer_already_follows(self, db_session):
+        """Viewer who already follows target → is_following=True, is_own_profile=False."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        viewer_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+        await svc.get_my_profile(viewer_payload)
+        await svc.follow_user(viewer_payload, owner.id)
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=viewer_payload)
+
+        assert pub.is_own_profile is False
+        assert pub.is_following is True
+
+    @pytest.mark.asyncio
+    async def test_is_following_false_when_viewer_does_not_follow(self, db_session):
+        """Viewer who has NOT followed target → is_following=False, is_own_profile=False."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        viewer_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+        await svc.get_my_profile(viewer_payload)  # Creates viewer profile; no follow
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=viewer_payload)
+
+        assert pub.is_own_profile is False
+        assert pub.is_following is False
+
+    @pytest.mark.asyncio
+    async def test_is_following_false_after_unfollow(self, db_session):
+        """Viewer unfollows → is_following transitions to False."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        viewer_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+        await svc.get_my_profile(viewer_payload)
+        await svc.follow_user(viewer_payload, owner.id)
+        await svc.unfollow_user(viewer_payload, owner.id)
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=viewer_payload)
+
+        assert pub.is_following is False
+
+    @pytest.mark.asyncio
+    async def test_malformed_viewer_payload_degrades_gracefully(self, db_session):
+        """Payload missing 'sub' → silently falls back to unauthenticated defaults."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+
+        bad_payload = {"email": "x@x.com", "roles": ["USER"]}  # no 'sub'
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=bad_payload)
+
+        assert pub.is_own_profile is False
+        assert pub.is_following is False
+
+    @pytest.mark.asyncio
+    async def test_auth_user_id_not_in_public_profile_response(self, db_session):
+        """auth_user_id is never present on PublicProfileResponse even with viewer context."""
+        from app.services.user import UserService
+        svc = UserService(db_session)
+        owner_payload = _make_jwt_payload(uuid.uuid4())
+        owner = await svc.get_my_profile(owner_payload)
+
+        pub = await svc.get_public_profile(owner.username, viewer_jwt_payload=owner_payload)
+
+        assert not hasattr(pub, "auth_user_id")
+
 
 # ===========================================================================
 # [INTEGRATION] Followers and following lists (paginated)
