@@ -30,6 +30,7 @@ import { ToastProvider } from "@/components/overlays/Toast";
 import { useRouter } from "@/router/Router";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
+import DiscoverView from "@/views/Discover";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -63,7 +64,7 @@ function ActiveWorkspace() {
 
   switch (currentView) {
     case "discover":
-      return <WorkspacePlaceholder view="discover" />;
+      return <DiscoverView />;
     case "communities":
       return <WorkspacePlaceholder view="communities" />;
     case "community-detail":
