@@ -31,6 +31,7 @@ import { useRouter } from "@/router/Router";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
 import DiscoverView from "@/views/Discover";
+import { GuidesView, GuidePortfolioView } from "@/views/Guides";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -74,9 +75,9 @@ function ActiveWorkspace() {
     case "expedition-workspace":
       return <WorkspacePlaceholder view="expedition workspace" />;
     case "guides":
-      return <WorkspacePlaceholder view="guides" />;
+      return <GuidesView />;
     case "guide-portfolio":
-      return <WorkspacePlaceholder view="guide portfolio" />;
+      return <GuidePortfolioView />;
     case "messages":
       return <WorkspacePlaceholder view="messages" />;
     case "profile":
