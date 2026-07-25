@@ -32,6 +32,7 @@ import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
 import DiscoverView from "@/views/Discover";
 import { GuidesView, GuidePortfolioView } from "@/views/Guides";
+import { CommunitiesView, CommunityDetailView } from "@/views/Communities";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -67,9 +68,9 @@ function ActiveWorkspace() {
     case "discover":
       return <DiscoverView />;
     case "communities":
-      return <WorkspacePlaceholder view="communities" />;
+      return <CommunitiesView />;
     case "community-detail":
-      return <WorkspacePlaceholder view="community detail" />;
+      return <CommunityDetailView />;
     case "my-trips":
       return <WorkspacePlaceholder view="my trips" />;
     case "expedition-workspace":
