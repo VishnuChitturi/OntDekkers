@@ -33,6 +33,7 @@ import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
 import DiscoverView from "@/views/Discover";
 import { GuidesView, GuidePortfolioView } from "@/views/Guides";
 import { CommunitiesView, CommunityDetailView } from "@/views/Communities";
+import { MyTripsView, ExpeditionWorkspaceView } from "@/views/Trips";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -72,9 +73,9 @@ function ActiveWorkspace() {
     case "community-detail":
       return <CommunityDetailView />;
     case "my-trips":
-      return <WorkspacePlaceholder view="my trips" />;
+      return <MyTripsView />;
     case "expedition-workspace":
-      return <WorkspacePlaceholder view="expedition workspace" />;
+      return <ExpeditionWorkspaceView />;
     case "guides":
       return <GuidesView />;
     case "guide-portfolio":
