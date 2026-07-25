@@ -518,3 +518,17 @@ export interface ApiError {
   detail: string;
   status: number;
 }
+
+// ---------------------------------------------------------------------------
+// Filter parameter types (mirrored from backend query schemas)
+// ---------------------------------------------------------------------------
+
+/** Query filters for the guide directory endpoint */
+export interface GuideFilter {
+  country?: string;
+  language?: string;
+  availability?: AvailabilityStatus;
+  verification_status?: VerificationStatus;
+  page?: number;
+  page_size?: number;
+}
