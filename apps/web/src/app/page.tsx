@@ -3,8 +3,7 @@
 /**
  * OntDekker — Application Shell
  *
- * This is the root page component.  It assembles the persistent application
- * shell:
+ * Assembles the persistent application shell:
  *
  *   ┌──────────────────────────────────────────────┐
  *   │                   Navbar                     │ ← sticky, z-40
@@ -15,25 +14,26 @@
  *   │                 │                            │
  *   └─────────────────┴────────────────────────────┘
  *
- * The Navbar and Sidebar never unmount — only the workspace content changes
- * when the user navigates.  This preserves scroll position and prevents
- * layout thrash between views.
+ * Overlay hierarchy (above the workspace, never replacing it):
+ *   ToastProvider  → fixed bottom-right stack   z-[60]
+ *   Modal          → fixed centred              z-50
+ *   Dialog         → fixed centred              z-50
+ *   Drawer         → fixed bottom sheet         z-50
  *
- * Views are rendered via a switch on `currentView` from useRouter().
- * Each view is a lazy-loaded component; stubs are shown until the views are
- * implemented in subsequent checkpoints.
+ * The Navbar and Sidebar never unmount. Only the active workspace changes.
  */
 
 import React, { useMemo } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Sidebar from "@/components/layout/Sidebar";
+import { ToastProvider } from "@/components/overlays/Toast";
 import { useRouter } from "@/router/Router";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Workspace placeholder (used until real view components are built)
+// Workspace placeholder — replaced in future checkpoints with real views
 // ---------------------------------------------------------------------------
 
 function WorkspacePlaceholder({ view }: { view: string }) {
@@ -55,14 +55,12 @@ function WorkspacePlaceholder({ view }: { view: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Active workspace — switch on currentView
+// Active workspace — switches on currentView from virtual router
 // ---------------------------------------------------------------------------
 
 function ActiveWorkspace() {
   const { currentView } = useRouter();
 
-  // In later checkpoints each case imports the real view component.
-  // For now every view renders the placeholder so the shell can be verified.
   switch (currentView) {
     case "discover":
       return <WorkspacePlaceholder view="discover" />;
@@ -95,7 +93,7 @@ function ActiveWorkspace() {
 
 export default function AppShell() {
   const { state } = useAppState();
-  const { unreadMessagesCount, unreadNotificationsCount } = state;
+  const { unreadMessagesCount } = state;
 
   // Merge runtime badge counts into the static nav items
   const navItems: NavigationItem[] = useMemo(
@@ -111,27 +109,29 @@ export default function AppShell() {
 
   return (
     /*
-     * Outer wrapper fills the viewport.
-     * flex-col stacks Navbar on top; the row below contains Sidebar + Workspace.
+     * ToastProvider wraps the entire shell so any descendant component
+     * can call useToast() to trigger notifications.
      */
-    <div className="flex flex-col min-h-screen bg-canvas">
-      {/* ── Top navigation bar ─────────────────────────────────────────── */}
-      <Navbar />
+    <ToastProvider>
+      <div className="flex flex-col min-h-screen bg-canvas">
+        {/* ── Top navigation bar ──────────────────────────────────────── */}
+        <Navbar />
 
-      {/* ── Body row (sidebar + active workspace) ──────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Primary sidebar */}
-        <Sidebar items={navItems} />
+        {/* ── Body row (sidebar + active workspace) ───────────────────── */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Primary sidebar */}
+          <Sidebar items={navItems} />
 
-        {/* Active workspace — grows to fill remaining width */}
-        <main
-          id="main-content"
-          className="flex-1 overflow-y-auto focus:outline-none"
-          tabIndex={-1}
-        >
-          <ActiveWorkspace />
-        </main>
+          {/* Active workspace — grows to fill remaining width */}
+          <main
+            id="main-content"
+            className="flex-1 overflow-y-auto focus:outline-none"
+            tabIndex={-1}
+          >
+            <ActiveWorkspace />
+          </main>
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 }

@@ -22,6 +22,7 @@
  *   - aria-busy during loading
  *   - aria-disabled when disabled or loading
  *   - focus-visible ring-black per design system
+ *   - Forwards ref so parent components can manage focus (e.g. Dialog)
  */
 
 import React from "react";
@@ -68,86 +69,86 @@ const iconSizeClasses: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Component
+// Component (forwardRef so parent can programmatically focus)
 // ---------------------------------------------------------------------------
 
-export default function Button({
-  variant = "primary",
-  size = "md",
-  loading = false,
-  icon: Icon,
-  iconPosition = "left",
-  iconOnly = false,
-  disabled,
-  className = "",
-  children,
-  onClick,
-  onMouseEnter,
-  onMouseLeave,
-  onFocus,
-  onBlur,
-  type = "button",
-  ...rest
-}: ButtonProps) {
-  const isDisabled = disabled || loading;
-  const iconClass = iconSizeClasses[size];
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(
+    {
+      variant = "primary",
+      size = "md",
+      loading = false,
+      icon: Icon,
+      iconPosition = "left",
+      iconOnly = false,
+      disabled,
+      className = "",
+      children,
+      onClick,
+      onMouseEnter,
+      onMouseLeave,
+      onFocus,
+      onBlur,
+      type = "button",
+      ...rest
+    },
+    ref,
+  ) {
+    const isDisabled = disabled || loading;
+    const iconClass = iconSizeClasses[size];
 
-  const baseClasses = [
-    "relative inline-flex items-center justify-center",
-    "font-medium select-none",
-    "transition-all duration-[var(--duration-responsive)] ease-[var(--ease-standard)]",
-    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
-    isDisabled ? "opacity-50 cursor-not-allowed pointer-events-none" : "cursor-pointer",
-    variantClasses[variant],
-    iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+    const baseClasses = [
+      "relative inline-flex items-center justify-center",
+      "font-medium select-none",
+      "transition-all duration-[var(--duration-responsive)] ease-[var(--ease-standard)]",
+      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
+      isDisabled ? "opacity-50 cursor-not-allowed pointer-events-none" : "cursor-pointer",
+      variantClasses[variant],
+      iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
+      className,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
-  return (
-    <motion.button
-      type={type}
-      disabled={isDisabled}
-      aria-busy={loading || undefined}
-      aria-disabled={isDisabled || undefined}
-      className={baseClasses}
-      whileTap={isDisabled ? undefined : { scale: 0.97 }}
-      transition={{ duration: 0.1, ease: [0.4, 0, 1, 1] }}
-      onClick={onClick}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      // Pass remaining safe HTML attributes (id, data-*, aria-*, name, form, value)
-      id={rest.id}
-      name={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).name}
-      form={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).form}
-      value={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).value}
-      data-testid={(rest as { "data-testid"?: string })["data-testid"]}
-    >
-      {/* Loading spinner */}
-      {loading && (
-        <Loader2
-          className={`${iconClass} animate-spin flex-shrink-0`}
-          aria-hidden="true"
-        />
-      )}
+    return (
+      <motion.button
+        ref={ref}
+        type={type}
+        disabled={isDisabled}
+        aria-busy={loading || undefined}
+        aria-disabled={isDisabled || undefined}
+        className={baseClasses}
+        whileTap={isDisabled ? undefined : { scale: 0.97 }}
+        transition={{ duration: 0.1, ease: [0.4, 0, 1, 1] }}
+        onClick={onClick}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        id={rest.id}
+        name={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).name}
+        form={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).form}
+        value={(rest as React.ButtonHTMLAttributes<HTMLButtonElement>).value}
+        data-testid={(rest as { "data-testid"?: string })["data-testid"]}
+      >
+        {loading && (
+          <Loader2
+            className={`${iconClass} animate-spin flex-shrink-0`}
+            aria-hidden="true"
+          />
+        )}
+        {!loading && Icon && iconPosition === "left" && (
+          <Icon className={`${iconClass} flex-shrink-0`} aria-hidden />
+        )}
+        {!iconOnly && children && (
+          <span className="truncate">{children}</span>
+        )}
+        {!loading && Icon && iconPosition === "right" && (
+          <Icon className={`${iconClass} flex-shrink-0`} aria-hidden />
+        )}
+      </motion.button>
+    );
+  },
+);
 
-      {/* Leading icon */}
-      {!loading && Icon && iconPosition === "left" && (
-        <Icon className={`${iconClass} flex-shrink-0`} aria-hidden />
-      )}
-
-      {/* Label */}
-      {!iconOnly && children && (
-        <span className="truncate">{children}</span>
-      )}
-
-      {/* Trailing icon */}
-      {!loading && Icon && iconPosition === "right" && (
-        <Icon className={`${iconClass} flex-shrink-0`} aria-hidden />
-      )}
-    </motion.button>
-  );
-}
+export default Button;
