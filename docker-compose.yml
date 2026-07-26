@@ -1,28 +1,80 @@
 version: '3.8'
 
+# =============================================================================
+# OntDekker — Local Development Docker Compose
+#
+# Infrastructure services: traefik, postgres, redis, kafka, minio
+# Application services:    feed-service, community-service
+#                          (auth/user — Dev 1; expedition/guide — Dev 3)
+#
+# First run:
+#   docker compose up -d --build
+#
+# Traefik routes traffic on port 80 using prefix-based path matching.
+# Each service is routed via its canonical /api/v1/<prefix> path.
+# =============================================================================
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # API Gateway — Traefik v2.10
+  # ---------------------------------------------------------------------------
   traefik:
     image: traefik:v2.10
+    container_name: ontdekker-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
+      - "8080:8080"    # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - ontdekker-net
 
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 — single container, per-service databases via init script
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
+    container_name: ontdekker-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     ports:
       - "5432:5432"
+    networks:
+      - ontdekker-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ---------------------------------------------------------------------------
+  # Redis 7
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7
+    container_name: ontdekker-redis
     ports:
       - "6379:6379"
+    networks:
+      - ontdekker-net
 
+  # ---------------------------------------------------------------------------
+  # Apache Kafka (KRaft mode — no ZooKeeper)
+  # ---------------------------------------------------------------------------
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    container_name: ontdekker-kafka
     ports:
       - "9092:9092"
     environment:
@@ -40,10 +92,110 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    networks:
+      - ontdekker-net
 
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage
+  # ---------------------------------------------------------------------------
   minio:
-    image: minio/minio
+    image: minio/minio:latest
+    container_name: ontdekker-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
     ports:
       - "9000:9000"
-      - "9001:9001"
-    command: server /data --console-address ":9001"
+      - "9001:9001"    # MinIO console
+    networks:
+      - ontdekker-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Feed Service  (Developer 2)
+  # Traefik route: /api/v1/feed/* → feed-service:8000
+  # ---------------------------------------------------------------------------
+  feed-service:
+    build:
+      context: .
+      dockerfile: services/feed-service/Dockerfile
+    container_name: ontdekker-feed-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/feed_db
+      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_ALGORITHM: HS256
+      SERVICE_NAME: feed-service
+      ENVIRONMENT: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      KAFKA_URL: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.feed-service.rule=PathPrefix(`/api/v1/feed`)"
+      - "traefik.http.routers.feed-service.entrypoints=web"
+      - "traefik.http.services.feed-service.loadbalancer.server.port=8000"
+    networks:
+      - ontdekker-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Community Service  (Developer 2)
+  # Traefik route: /api/v1/communities/* → community-service:8000
+  # ---------------------------------------------------------------------------
+  community-service:
+    build:
+      context: .
+      dockerfile: services/community-service/Dockerfile
+    container_name: ontdekker-community-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/community_db
+      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_ALGORITHM: HS256
+      SERVICE_NAME: community-service
+      ENVIRONMENT: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      KAFKA_URL: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.community-service.rule=PathPrefix(`/api/v1/communities`)"
+      - "traefik.http.routers.community-service.entrypoints=web"
+      - "traefik.http.services.community-service.loadbalancer.server.port=8000"
+    networks:
+      - ontdekker-net
+    restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+  minio_data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ontdekker-net:
+    driver: bridge

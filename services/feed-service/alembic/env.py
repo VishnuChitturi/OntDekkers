@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.config.settings import settings
-from shared import Base
+from shared.database import Base
+
+# Import all models for Alembic autodiscovery
+from app.models import Post, PostMedia, PostTag, Like, Bookmark, Share, Comment
 
 # Alembic Config object
 config = context.config

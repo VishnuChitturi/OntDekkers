@@ -41,6 +41,18 @@ class DatabaseException(OntDekkerException):
     def __init__(self, message: str = "Database operation failed.", error_code: str = "DATABASE_ERROR", details: Optional[Any] = None):
         super().__init__(message, error_code, 500, details)
 
+
+# ---------------------------------------------------------------------------
+# Short-form aliases used across services for ergonomic imports
+# ---------------------------------------------------------------------------
+
+NotFoundError = NotFoundException
+ForbiddenError = ForbiddenException
+ValidationError = ValidationException
+ConflictError = ConflictException
+UnauthorizedError = UnauthorizedException
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(OntDekkerException)
     async def ontdekker_exception_handler(request: Request, exc: OntDekkerException):
