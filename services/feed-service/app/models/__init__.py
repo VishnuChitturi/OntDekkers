@@ -21,4 +21,4 @@ __all__ = [
     "Bookmark",
     "Share",
     "Comment",
-]\n
+]

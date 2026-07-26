@@ -86,4 +86,4 @@ __all__ = [
     "LikeActionResponse",
     "BookmarkActionResponse",
     "ShareActionResponse",
-]\n
+]

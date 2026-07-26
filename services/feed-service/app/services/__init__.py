@@ -12,4 +12,4 @@ __all__ = [
     "PostService",
     "CommentService",
     "MediaService",
-]\n
+]

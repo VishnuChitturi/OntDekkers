@@ -14,8 +14,13 @@ from app.models import Post, PostMedia, PostTag, Like, Bookmark, Share, Comment
 config = context.config
 
 # Interpret the config file for Python logging.
+# Guard: only call fileConfig if the ini has the required [loggers] section.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    import configparser as _cp
+    _parser = _cp.ConfigParser()
+    _parser.read(config.config_file_name)
+    if _parser.has_section("loggers"):
+        fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 

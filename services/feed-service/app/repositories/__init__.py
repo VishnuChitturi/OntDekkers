@@ -12,4 +12,4 @@ __all__ = [
     "PostRepository",
     "InteractionRepository", 
     "CommentRepository",
-]\n
+]
