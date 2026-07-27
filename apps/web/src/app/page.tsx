@@ -15,24 +15,30 @@
  *   └─────────────────┴────────────────────────────┘
  *
  * Overlay hierarchy (above the workspace, never replacing it):
- *   ToastProvider  → fixed bottom-right stack   z-[60]
- *   Modal          → fixed centred              z-50
- *   Dialog         → fixed centred              z-50
- *   Drawer         → fixed bottom sheet         z-50
+ *   ToastProvider           → fixed bottom-right stack   z-[60]
+ *   GlobalSearch            → fixed full-screen          z-[55]
+ *   FloatingCreateButton    → fixed bottom-right         z-[46]
+ *   NotificationsDrawer     → fixed bottom sheet         z-50
+ *   Modal                   → fixed centred              z-50
+ *   Dialog                  → fixed centred              z-50
+ *   Drawer                  → fixed bottom sheet         z-50
  *
  * The Navbar and Sidebar never unmount. Only the active workspace changes.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import Navbar from "@/components/layout/Navbar";
 import Sidebar from "@/components/layout/Sidebar";
 import { ToastProvider } from "@/components/overlays/Toast";
 import { NotificationsDrawer } from "@/components/overlays/NotificationsDrawer";
+import { GlobalSearch } from "@/components/overlays/GlobalSearch";
+import { FloatingCreateButton } from "@/components/overlays/FloatingCreateButton";
 import { useRouter } from "@/router/Router";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
 import DiscoverView from "@/views/Discover";
-import { GuidesView, GuidePortfolioView } from "@/views/Guides";
+import { GuidesView, GuidePortfolioView, MyGuidesView } from "@/views/Guides";
 import { CommunitiesView, CommunityDetailView } from "@/views/Communities";
 import { MyTripsView, ExpeditionWorkspaceView } from "@/views/Trips";
 import { MessagesView } from "@/views/Messages";
@@ -41,58 +47,55 @@ import { SettingsView } from "@/views/Settings";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Workspace placeholder — replaced in future checkpoints with real views
-// ---------------------------------------------------------------------------
-
-function WorkspacePlaceholder({ view }: { view: string }) {
-  return (
-    <div className="flex-1 flex items-center justify-center p-8">
-      <div className="text-center space-y-3">
-        <p className="text-xs font-mono uppercase tracking-widest text-muted-slate">
-          Workspace
-        </p>
-        <h2 className="text-2xl font-bold tracking-tight text-ink capitalize">
-          {view.replace(/-/g, " ")}
-        </h2>
-        <p className="text-sm text-charcoal max-w-xs">
-          This view will be implemented in a future checkpoint.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Active workspace — switches on currentView from virtual router
+// Active workspace — view-driven, wrapped in AnimatePresence for transitions
 // ---------------------------------------------------------------------------
 
 function ActiveWorkspace() {
   const { currentView } = useRouter();
 
-  switch (currentView) {
-    case "discover":
-      return <DiscoverView />;
-    case "communities":
-      return <CommunitiesView />;
-    case "community-detail":
-      return <CommunityDetailView />;
-    case "my-trips":
-      return <MyTripsView />;
-    case "expedition-workspace":
-      return <ExpeditionWorkspaceView />;
-    case "guides":
-      return <GuidesView />;
-    case "guide-portfolio":
-      return <GuidePortfolioView />;
-    case "messages":
-      return <MessagesView />;
-    case "profile":
-      return <ProfileView />;
-    case "settings":
-      return <SettingsView />;
-    default:
-      return <WorkspacePlaceholder view="discover" />;
+  function renderView() {
+    switch (currentView) {
+      case "discover":
+        return <DiscoverView />;
+      case "communities":
+        return <CommunitiesView />;
+      case "community-detail":
+        return <CommunityDetailView />;
+      case "my-trips":
+        return <MyTripsView />;
+      case "expedition-workspace":
+        return <ExpeditionWorkspaceView />;
+      case "guides":
+        return <GuidesView />;
+      case "guide-portfolio":
+        return <GuidePortfolioView />;
+      case "my-guides":
+        return <MyGuidesView />;
+      case "messages":
+        return <MessagesView />;
+      case "profile":
+        return <ProfileView />;
+      case "settings":
+        return <SettingsView />;
+      default:
+        return <DiscoverView />;
+    }
   }
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={currentView}
+        className="flex-1 min-h-full"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
+      >
+        {renderView()}
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +105,7 @@ function ActiveWorkspace() {
 export default function AppShell() {
   const { state } = useAppState();
   const { unreadMessagesCount } = state;
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   // Merge runtime badge counts into the static nav items
   const navItems: NavigationItem[] = useMemo(
@@ -123,7 +127,7 @@ export default function AppShell() {
     <ToastProvider>
       <div className="flex flex-col min-h-screen bg-canvas">
         {/* ── Top navigation bar ──────────────────────────────────────── */}
-        <Navbar />
+        <Navbar onSearchOpen={() => setIsSearchOpen(true)} />
 
         {/* ── Body row (sidebar + active workspace) ───────────────────── */}
         <div className="flex flex-1 overflow-hidden">
@@ -141,8 +145,13 @@ export default function AppShell() {
         </div>
       </div>
 
-      {/* ── Notifications Drawer ──────────────────────────────────────── */}
+      {/* ── Overlays (rendered outside main layout flow) ─────────────── */}
       <NotificationsDrawer />
+      <GlobalSearch
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+      />
+      <FloatingCreateButton />
     </ToastProvider>
   );
 }

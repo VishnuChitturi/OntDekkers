@@ -465,6 +465,7 @@ export type ViewName =
   | "expedition-workspace"
   | "guides"
   | "guide-portfolio"
+  | "my-guides"
   | "messages"
   | "profile"
   | "settings";
