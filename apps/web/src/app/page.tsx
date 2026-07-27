@@ -34,6 +34,9 @@ import DiscoverView from "@/views/Discover";
 import { GuidesView, GuidePortfolioView } from "@/views/Guides";
 import { CommunitiesView, CommunityDetailView } from "@/views/Communities";
 import { MyTripsView, ExpeditionWorkspaceView } from "@/views/Trips";
+import { MessagesView } from "@/views/Messages";
+import { ProfileView } from "@/views/Profile";
+import { SettingsView } from "@/views/Settings";
 import type { NavigationItem } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -81,11 +84,11 @@ function ActiveWorkspace() {
     case "guide-portfolio":
       return <GuidePortfolioView />;
     case "messages":
-      return <WorkspacePlaceholder view="messages" />;
+      return <MessagesView />;
     case "profile":
-      return <WorkspacePlaceholder view="profile" />;
+      return <ProfileView />;
     case "settings":
-      return <WorkspacePlaceholder view="settings" />;
+      return <SettingsView />;
     default:
       return <WorkspacePlaceholder view="discover" />;
   }
