@@ -27,6 +27,7 @@ import React, { useMemo } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Sidebar from "@/components/layout/Sidebar";
 import { ToastProvider } from "@/components/overlays/Toast";
+import { NotificationsDrawer } from "@/components/overlays/NotificationsDrawer";
 import { useRouter } from "@/router/Router";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { PRIMARY_NAV_ITEMS } from "@/state/navigation";
@@ -139,6 +140,9 @@ export default function AppShell() {
           </main>
         </div>
       </div>
+
+      {/* ── Notifications Drawer ──────────────────────────────────────── */}
+      <NotificationsDrawer />
     </ToastProvider>
   );
 }
