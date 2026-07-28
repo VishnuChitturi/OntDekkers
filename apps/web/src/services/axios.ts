@@ -6,7 +6,7 @@
  * this module or the useApi() hook.
  *
  * Configuration:
- *   baseURL   : NEXT_PUBLIC_API_BASE_URL (env) or http://localhost:80 (dev fallback)
+ *   baseURL   : NEXT_PUBLIC_API_BASE_URL (env) or "" (relative URLs — dev default)
  *   timeout   : 15 000 ms
  *   headers   : Content-Type: application/json
  *
@@ -37,12 +37,23 @@ import type { ApiError } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Base URL — reads from Next.js public env var
+//
+// Falls back to "" (empty string) so Axios uses relative URLs when
+// NEXT_PUBLIC_API_BASE_URL is not set (e.g. a fresh clone with no
+// .env.local).  Relative URLs work correctly in both environments:
+//
+//   Browser  → relative paths hit the same origin (http://localhost:3000),
+//              and Next.js rewrite rules proxy /guides/api/* and
+//              /expeditions/api/* to the backend services.
+//
+//   SSR      → Next.js rewrites also apply on the server side, so the
+//              server-rendered requests go through the same proxy rules.
+//
+// When NEXT_PUBLIC_API_BASE_URL is explicitly set (e.g. in production to
+// the Traefik gateway domain) that value is used instead.
 // ---------------------------------------------------------------------------
 
-const BASE_URL =
-  typeof window !== "undefined"
-    ? (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:80")
-    : "http://localhost:80";
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 // ---------------------------------------------------------------------------
 // Axios instance
