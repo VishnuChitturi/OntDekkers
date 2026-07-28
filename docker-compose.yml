@@ -1,6 +1,8 @@
-version: '3.8'
-
 services:
+
+  # ---------------------------------------------------------------------------
+  # API Gateway
+  # ---------------------------------------------------------------------------
   traefik:
     image: traefik:v2.10
     ports:
@@ -8,19 +10,44 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  #
+  # The init-databases.sh script is mounted into docker-entrypoint-initdb.d/.
+  # The postgres image runs every .sh file in that directory automatically on
+  # a fresh volume, creating guide_db and trip_db before any service connects.
+  #
+  # The healthcheck uses pg_isready so downstream services only start after
+  # PostgreSQL is actually accepting connections — no sleep timers needed.
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7
     ports:
       - "6379:6379"
 
+  # ---------------------------------------------------------------------------
+  # Kafka (KRaft mode — no ZooKeeper)
+  # ---------------------------------------------------------------------------
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     ports:
@@ -41,9 +68,79 @@ services:
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
 
+  # ---------------------------------------------------------------------------
+  # MinIO object storage
+  # ---------------------------------------------------------------------------
   minio:
     image: minio/minio
     ports:
       - "9000:9000"
       - "9001:9001"
     command: server /data --console-address ":9001"
+
+  # ---------------------------------------------------------------------------
+  # Expedition Service
+  #
+  # Depends on postgres being healthy (not just started) so the entrypoint's
+  # pg_isready check and alembic migration run only once PG is ready.
+  # restart: on-failure handles the unlikely race where PG accepts the
+  # healthcheck but isn't yet ready for application connections.
+  # ---------------------------------------------------------------------------
+  expedition-service:
+    build:
+      context: .
+      dockerfile: services/expedition-service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Guide Service
+  #
+  # Same pattern as expedition-service.
+  # ---------------------------------------------------------------------------
+  guide-service:
+    build:
+      context: .
+      dockerfile: services/guide-service/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/guide_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Next.js web application
+  #
+  # Built from the apps/web directory. Depends on both backend services being
+  # up so API calls on first load find the services ready.
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+    depends_on:
+      - guide-service
+      - expedition-service
+
+# ---------------------------------------------------------------------------
+# Named volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
