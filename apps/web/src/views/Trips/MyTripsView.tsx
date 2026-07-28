@@ -14,7 +14,7 @@
  *   useSWR(expeditionKeys.mine(params), swrFetcherWithParams)
  *   → PaginatedResponse<ExpeditionSummary>
  *
- * Card click → navigateTo("expedition-workspace", expedition.id)
+ * Card click → router.push(`/expeditions/${expedition.id}`)
  */
 
 import React, { useState, useMemo } from "react";
@@ -26,7 +26,7 @@ import TripCard from "@/components/cards/TripCard";
 import Button from "@/components/feedback/Button";
 
 import { swrFetcherWithParams, expeditionKeys } from "@/services/cache";
-import { useRouter } from "@/router/Router";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/useToast";
 
 import TripCardSkeleton from "./TripCardSkeleton";
@@ -88,7 +88,7 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
 // ---------------------------------------------------------------------------
 
 export default function MyTripsView() {
-  const { navigateTo } = useRouter();
+  const router = useRouter();
   const { showToast: _showToast } = useToast(); // available for future actions
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -145,7 +145,7 @@ export default function MyTripsView() {
         ))}
         {data && (
           <span className="ml-auto text-[10px] font-mono text-muted-slate">
-            {trips.length} of {data.pagination.total}
+            {trips.length} of {data.pagination.totalItems}
           </span>
         )}
       </div>
@@ -168,7 +168,7 @@ export default function MyTripsView() {
                 key={trip.id}
                 trip={trip}
                 index={index}
-                onClick={() => navigateTo("expedition-workspace", trip.id)}
+                onClick={() => router.push(`/expeditions/${trip.id}`)}
               />
             ))}
           </div>

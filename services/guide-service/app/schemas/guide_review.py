@@ -153,8 +153,13 @@ class GuideRatingSummary(BaseModel):
 # ---------------------------------------------------------------------------
 
 class GuideReviewListResponse(BaseModel):
-    """Paginated list of reviews for a guide."""
+    """Paginated list of reviews for a guide.
+
+    Uses `items` (matching PaginatedResponse convention) so the frontend
+    can consume this with the same `data?.items ?? []` pattern.
+    `guide_id` is included for cache-key convenience on the client.
+    """
 
     guide_id: UUID
-    reviews: List[GuideReviewResponse] = Field(default_factory=list)
+    items: List[GuideReviewResponse] = Field(default_factory=list)
     pagination: PaginationMeta

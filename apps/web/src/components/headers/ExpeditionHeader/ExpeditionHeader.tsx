@@ -7,7 +7,7 @@
  *
  * Information displayed (per 05-component-library.md § Expedition Header):
  *   - Cover image (full-width hero)
- *   - Back button (uses onBack from virtual router)
+ *   - Back button (calls onBack prop — caller uses router.back())
  *   - Title
  *   - Destination
  *   - Status badge
@@ -125,17 +125,19 @@ export default function ExpeditionHeader({ expedition, onBack }: ExpeditionHeade
         </div>
 
         {/* Organiser */}
-        <div className="flex items-center gap-2">
-          <Avatar
-            src={expedition.organizer.avatarUrl}
-            alt={expedition.organizer.displayName}
-            size="xs"
-          />
-          <span className="text-xs text-charcoal">
-            <span className="text-muted-slate">Organised by </span>
-            <span className="font-medium">{expedition.organizer.displayName}</span>
-          </span>
-        </div>
+        {expedition.organizer && (
+          <div className="flex items-center gap-2">
+            <Avatar
+              src={expedition.organizer.avatarUrl}
+              alt={expedition.organizer.displayName}
+              size="xs"
+            />
+            <span className="text-xs text-charcoal">
+              <span className="text-muted-slate">Organised by </span>
+              <span className="font-medium">{expedition.organizer.displayName}</span>
+            </span>
+          </div>
+        )}
 
         {/* Description */}
         {expedition.description && (

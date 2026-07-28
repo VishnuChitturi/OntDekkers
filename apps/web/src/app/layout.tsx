@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppStateProvider } from "@/contexts/AppStateProvider";
-import { RouterProvider } from "@/router/Router";
+import { ToastProvider } from "@/components/overlays/Toast";
 
 // ---------------------------------------------------------------------------
 // Fonts — loaded via next/font for zero layout shift and self-hosting
@@ -26,14 +26,12 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "OntDekker — Discover the World, Slowly",
+    default: "OntDekker — Guides & Expeditions",
     template: "%s | OntDekker",
   },
   description:
-    "A premium slow-travel community platform connecting mindful explorers " +
-    "with verified local guides through collaborative expedition planning " +
-    "and authentic storytelling.",
-  keywords: ["slow travel", "expedition", "guides", "community", "adventure"],
+    "Plan expeditions and connect with verified local guides on OntDekker.",
+  keywords: ["slow travel", "expedition", "guides", "adventure"],
   openGraph: {
     siteName: "OntDekker",
     type: "website",
@@ -57,14 +55,13 @@ export default function RootLayout({
     >
       <body className="min-h-screen bg-canvas antialiased">
         {/*
-         * AppStateProvider wraps the entire tree so any component can access
-         * global application state via useAppState().
-         *
-         * RouterProvider drives the virtual navigation model — all view
-         * transitions happen inside here without browser page reloads.
+         * AppStateProvider — global state for guides, expeditions, and auth.
+         * ToastProvider    — enables useToast() in any descendant component.
          */}
         <AppStateProvider>
-          <RouterProvider>{children}</RouterProvider>
+          <ToastProvider>
+            {children}
+          </ToastProvider>
         </AppStateProvider>
       </body>
     </html>

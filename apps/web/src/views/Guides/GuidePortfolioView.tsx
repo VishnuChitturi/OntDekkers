@@ -4,7 +4,7 @@
  * OntDekker GuidePortfolioView
  *
  * Full guide profile page. Navigated to from GuidesView via
- * navigateTo("guide-portfolio", guide.id).
+ * router.push(`/guides/${guide.id}`).
  *
  * Sections (per 03-screen-specs.md § Guide Portfolio):
  *   1. Back button + primary actions (Message, Bookmark)
@@ -20,8 +20,7 @@
  *
  * Actions:
  *   Bookmark → bookmarkGuide / unbookmarkGuide + useToast
- *   Message  → navigateTo("messages")
- *   Back     → goBack()
+ *   Back     → router.back()
  */
 
 import React from "react";
@@ -29,7 +28,6 @@ import useSWR from "swr";
 import { motion } from "motion/react";
 import {
   ArrowLeft,
-  MessageCircle,
   Bookmark,
   Star,
   MapPin,
@@ -46,13 +44,13 @@ import { VerificationBadge } from "@/components/feedback/Badge";
 
 import { swrFetcher } from "@/services/cache";
 import { guideKeys } from "@/services/cache";
-import { bookmarkGuide, unbookmarkGuide } from "@/services/api";
+import { bookmarkGuide, unbookmarkGuide } from "@/services/guideApi";
 
-import { useRouter } from "@/router/Router";
+import { useRouter, useParams } from "next/navigation";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { useToast } from "@/hooks/useToast";
 
-import type { GuideProfile, GuideRatingSummary, PaginatedResponse, GuideReview } from "@/types";
+import type { GuideProfile, GuideRatingSummary, PaginatedResponse, GuideReview, ApiResponse } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Loading skeleton for the portfolio
@@ -164,19 +162,23 @@ function ReviewItem({ review }: { review: GuideReview }) {
 // ---------------------------------------------------------------------------
 
 export default function GuidePortfolioView() {
-  const { currentId, goBack, navigateTo } = useRouter();
+  const router = useRouter();
+  const params = useParams();
   const { state } = useAppState();
   const { showToast } = useToast();
 
-  const guideId = currentId ?? "";
+  const guideId = (params.id as string) ?? "";
   const isBookmarked = state.savedGuides.some((g) => g.id === guideId);
 
   // ── SWR fetches ────────────────────────────────────────────────────────────
-  const { data: profile, error: profileError, isLoading } = useSWR<GuideProfile>(
+  const { data: profileResponse, error: profileError, isLoading } = useSWR<ApiResponse<GuideProfile>>(
     guideId ? guideKeys.byId(guideId) : null,
     swrFetcher,
     { revalidateOnFocus: false },
   );
+
+  // Unwrap the ApiResponse wrapper — backend returns { success, message, data }
+  const profile = profileResponse?.data;
 
   const { data: ratingSummary } = useSWR<GuideRatingSummary>(
     guideId ? guideKeys.ratingSummary(guideId) : null,
@@ -199,7 +201,7 @@ export default function GuidePortfolioView() {
         showToast("Bookmark removed.", "info");
       } else {
         await bookmarkGuide(guideId);
-        showToast(`${profile.user.displayName} bookmarked!`, "success");
+        showToast(`${profile.user?.displayName ?? "Guide"} bookmarked!`, "success");
       }
     } catch {
       showToast("Could not update bookmark. Please try again.", "error");
@@ -207,9 +209,9 @@ export default function GuidePortfolioView() {
   }
 
   // ── States ─────────────────────────────────────────────────────────────────
-  if (!guideId) return <ProfileError onBack={goBack} />;
+  if (!guideId) return <ProfileError onBack={() => router.back()} />;
   if (isLoading) return <PortfolioSkeleton />;
-  if (profileError || !profile) return <ProfileError onBack={goBack} />;
+  if (profileError || !profile) return <ProfileError onBack={() => router.back()} />;
 
   const isVerified = profile.verificationStatus === "VERIFIED";
   const availability = profile.availability;
@@ -243,7 +245,7 @@ export default function GuidePortfolioView() {
         <button
           type="button"
           aria-label="Go back"
-          onClick={goBack}
+          onClick={router.back.bind(router)}
           className="
             absolute top-4 left-4
             flex items-center justify-center
@@ -263,7 +265,7 @@ export default function GuidePortfolioView() {
         <div className="flex items-end justify-between -mt-12">
           <Avatar
             src={profile.profileImageUrl}
-            alt={profile.user.displayName}
+            alt={profile.user?.displayName ?? "Guide"}
             size="xl"
             className="ring-4 ring-white shadow-sm"
           />
@@ -277,14 +279,7 @@ export default function GuidePortfolioView() {
               aria-label={isBookmarked ? "Remove bookmark" : "Bookmark guide"}
               className={isBookmarked ? "text-amber-600 border-amber-200 bg-amber-50" : ""}
             />
-            <Button
-              variant="primary"
-              size="sm"
-              icon={MessageCircle}
-              onClick={() => navigateTo("messages")}
-            >
-              Message
-            </Button>
+
           </div>
         </div>
 
@@ -292,7 +287,7 @@ export default function GuidePortfolioView() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-bold tracking-tight text-ink">
-              {profile.user.displayName}
+              {profile.user?.displayName ?? "Guide Profile"}
             </h1>
             {isVerified && <VerificationBadge size="sm" />}
           </div>
@@ -336,7 +331,7 @@ export default function GuidePortfolioView() {
         )}
 
         {/* ── Rating summary ─────────────────────────────────────────────── */}
-        {ratingSummary && ratingSummary.totalReviews > 0 && (
+        {ratingSummary && ratingSummary.reviewCount > 0 && (
           <section aria-label="Rating summary">
             <div className="bg-white border border-gray-100 rounded-3xl p-5 space-y-4">
               {/* Overall score */}
@@ -346,7 +341,7 @@ export default function GuidePortfolioView() {
                   {ratingSummary.averageOverall?.toFixed(1) ?? "—"}
                 </span>
                 <span className="text-sm text-muted-slate">
-                  from {ratingSummary.totalReviews} review{ratingSummary.totalReviews !== 1 ? "s" : ""}
+                  from {ratingSummary.reviewCount} review{ratingSummary.reviewCount !== 1 ? "s" : ""}
                 </span>
                 {ratingSummary.wouldRecommendPercentage !== null && (
                   <span className="ml-auto text-xs text-moss-green font-medium">

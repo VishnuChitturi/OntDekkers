@@ -109,16 +109,18 @@ export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
             <span className="flex items-center gap-1 col-span-2">
               <Users size={10} strokeWidth={2} aria-hidden="true" />
               <span>
-                {trip.currentParticipantsCount} / {trip.maxParticipants} participants
+                {trip.currentParticipantsCount ?? "—"} / {trip.maxParticipants} participants
               </span>
             </span>
           </div>
 
           {/* Organiser */}
-          <p className="text-xs text-charcoal">
-            <span className="text-muted-slate">by </span>
-            {trip.organizerName}
-          </p>
+          {trip.organizerName && (
+            <p className="text-xs text-charcoal">
+              <span className="text-muted-slate">by </span>
+              {trip.organizerName}
+            </p>
+          )}
         </div>
       </BaseCard>
     </motion.div>

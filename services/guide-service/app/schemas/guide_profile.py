@@ -110,14 +110,22 @@ class GuideProfileResponse(BaseModel):
 class GuideProfileSummary(BaseModel):
     """Lightweight guide card for the directory listing.
 
-    Used in GET /api/v1/guides. Excludes verbose fields to keep
-    list payloads small. The frontend renders this as a GuideCard component.
+    Used in GET /api/v1/guides. Includes locations, languages, and
+    availability so the frontend GuideCard can render location/language
+    chips and the availability indicator without a second round-trip.
+
+    display_name: a human-readable label for the card title.  When a
+    user-service integration is in place this will be populated from the
+    user record.  Until then it is None and the frontend falls back to a
+    placeholder.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     user_id: UUID
+
+    display_name: Optional[str] = None
 
     bio: Optional[str]
     profile_image_url: Optional[str]
@@ -127,3 +135,8 @@ class GuideProfileSummary(BaseModel):
     review_count: int
 
     verification_status: VerificationStatus
+
+    # Nested children — needed for card rendering and client-side search
+    locations: List[GuideLocationResponse] = Field(default_factory=list)
+    languages: List[GuideLanguageResponse] = Field(default_factory=list)
+    availability: Optional[GuideAvailabilityResponse] = None

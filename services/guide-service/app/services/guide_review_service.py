@@ -155,7 +155,7 @@ class GuideReviewService:
         )
         return GuideReviewListResponse(
             guide_id=guide_id,
-            reviews=[GuideReviewResponse.model_validate(r) for r in reviews],
+            items=[GuideReviewResponse.model_validate(r) for r in reviews],
             pagination=pagination,
         )
 

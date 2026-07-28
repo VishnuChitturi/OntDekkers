@@ -15,11 +15,13 @@
  *   The token is injected via setAuthToken() — called from AppStateProvider
  *   whenever the auth state changes.
  *
- * Response interceptor:
- *   Normalises all error responses into ApiError shape:
- *     { detail: string; status: number }
- *   Re-throws as a plain Error with a `status` property so callers
- *   can distinguish HTTP errors from network errors.
+ * Response interceptors:
+ *   1. Success: recursively converts snake_case keys to camelCase so all
+ *      response objects match the TypeScript type definitions.
+ *   2. Error: normalises all error responses into ApiError shape:
+ *        { detail: string; status: number }
+ *      Re-throws as a plain Error with a `status` property so callers
+ *      can distinguish HTTP errors from network errors.
  *
  * 401 handling:
  *   Dispatches a SIGN_OUT action by invoking the registered onUnauthorized
@@ -82,6 +84,37 @@ export function registerUnauthorizedHandler(handler: () => void): void {
 }
 
 // ---------------------------------------------------------------------------
+// Key transformer — snake_case → camelCase
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a single snake_case string to camelCase.
+ * "profile_image_url" → "profileImageUrl"
+ */
+function toCamel(s: string): string {
+  return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+/**
+ * Recursively converts all object keys from snake_case to camelCase.
+ * Arrays are walked element-by-element; primitives are returned as-is.
+ */
+function keysToCamel(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(keysToCamel);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        toCamel(k),
+        keysToCamel(v),
+      ]),
+    );
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
 // Request interceptor — inject Bearer token
 // ---------------------------------------------------------------------------
 
@@ -96,11 +129,15 @@ apiClient.interceptors.request.use(
 );
 
 // ---------------------------------------------------------------------------
-// Response interceptor — normalise errors
+// Response interceptor — camelCase transform + normalise errors
 // ---------------------------------------------------------------------------
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Transform all response data keys from snake_case to camelCase
+    response.data = keysToCamel(response.data);
+    return response;
+  },
   (error: AxiosError<ApiError>) => {
     const status = error.response?.status ?? 0;
     const detail =

@@ -16,11 +16,11 @@ import { Compass } from "lucide-react";
 import GuideCard from "@/components/cards/GuideCard";
 import Button from "@/components/feedback/Button";
 import { useAppState } from "@/contexts/AppStateProvider";
-import { useRouter } from "@/router/Router";
+import { useRouter } from "next/navigation";
 
 export default function MyGuidesView() {
   const { state } = useAppState();
-  const { navigateTo } = useRouter();
+  const router = useRouter();
   const { savedGuides } = state;
 
   return (
@@ -66,7 +66,7 @@ export default function MyGuidesView() {
             <Button
               variant="primary"
               size="md"
-              onClick={() => navigateTo("guides")}
+              onClick={() => router.push("/guides")}
             >
               Discover guides
             </Button>
@@ -89,8 +89,7 @@ export default function MyGuidesView() {
                 <GuideCard
                   guide={guide}
                   onBookmarkToggle={() => {}}
-                  onMessage={() => {}}
-                  onClick={() => navigateTo("guide-portfolio", guide.id)}
+                  onClick={() => router.push(`/guides/${guide.id}`)}
                   index={i}
                 />
               </motion.div>

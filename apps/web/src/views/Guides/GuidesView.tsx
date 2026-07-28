@@ -17,8 +17,8 @@
  *
  * Actions:
  *   Bookmark  → bookmarkGuide / unbookmarkGuide + useToast
- *   Message   → navigateTo("messages")
- *   View      → navigateTo("guide-portfolio", guide.id)
+ *   Message   → (not in Dev 3 scope)
+ *   View      → router.push(`/guides/${guide.id}`)
  */
 
 import React, { useState, useCallback, useMemo } from "react";
@@ -32,9 +32,9 @@ import Search from "@/components/navigation/Search";
 import Badge from "@/components/feedback/Badge";
 
 import { swrFetcherWithParams, guideKeys } from "@/services/cache";
-import { bookmarkGuide, unbookmarkGuide } from "@/services/api";
+import { bookmarkGuide, unbookmarkGuide } from "@/services/guideApi";
 
-import { useRouter } from "@/router/Router";
+import { useRouter } from "next/navigation";
 import { useAppState } from "@/contexts/AppStateProvider";
 import { useToast } from "@/hooks/useToast";
 
@@ -127,7 +127,7 @@ function FilterChip({
 // ---------------------------------------------------------------------------
 
 export default function GuidesView() {
-  const { navigateTo } = useRouter();
+  const router = useRouter();
   const { state } = useAppState();
   const { showToast } = useToast();
 
@@ -158,7 +158,7 @@ export default function GuidesView() {
     if (!searchQuery.trim()) return guides;
     const q = searchQuery.toLowerCase();
     return guides.filter((g) =>
-      g.displayName.toLowerCase().includes(q) ||
+      (g.displayName?.toLowerCase().includes(q) ?? false) ||
       g.bio?.toLowerCase().includes(q) ||
       g.locations.some((l) =>
         [l.country, l.region, l.city].some((v) => v?.toLowerCase().includes(q)),
@@ -178,7 +178,7 @@ export default function GuidesView() {
           showToast("Bookmark removed.", "info");
         } else {
           await bookmarkGuide(guide.id);
-          showToast(`${guide.displayName} bookmarked!`, "success");
+          showToast(`${guide.displayName ?? "Guide"} bookmarked!`, "success");
         }
       } catch {
         showToast("Could not update bookmark. Please try again.", "error");
@@ -237,7 +237,7 @@ export default function GuidesView() {
           )}
           {data && (
             <span className="ml-auto text-[10px] font-mono text-muted-slate">
-              {filteredGuides.length} of {data.pagination.total} guides
+              {filteredGuides.length} of {data.pagination.totalItems} guides
             </span>
           )}
         </div>
@@ -262,11 +262,7 @@ export default function GuidesView() {
                 guide={guide}
                 index={index}
                 onBookmarkToggle={(e) => handleBookmark(e, guide)}
-                onMessage={(e) => {
-                  e.stopPropagation();
-                  navigateTo("messages");
-                }}
-                onClick={() => navigateTo("guide-portfolio", guide.id)}
+                onClick={() => router.push(`/guides/${guide.id}`)}
               />
             ))}
           </div>

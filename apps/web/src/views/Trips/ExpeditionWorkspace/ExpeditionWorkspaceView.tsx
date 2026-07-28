@@ -45,9 +45,10 @@ import Button from "@/components/feedback/Button";
 import { WeightBadge } from "@/components/feedback/Badge";
 
 import { swrFetcher, expeditionKeys } from "@/services/cache";
-import { useRouter } from "@/router/Router";
+import { useRouter, useParams } from "next/navigation";
 
 import type {
+  ApiResponse,
   Expedition,
   GearItem,
   PackWeightSummary,
@@ -108,7 +109,7 @@ function OverviewTab({ expedition }: { expedition: Expedition }) {
           <div className="flex justify-between">
             <dt className="text-muted-slate">Capacity</dt>
             <dd className="font-mono font-medium text-ink">
-              {expedition.currentParticipantsCount} / {expedition.maxParticipants}
+              {expedition.currentParticipantsCount ?? "—"} / {expedition.maxParticipants}
             </dd>
           </div>
           {expedition.meetingPoint && (
@@ -141,14 +142,14 @@ const CATEGORY_LABELS: Record<GearCategory, string> = {
 };
 
 function PackingTab({ expeditionId }: { expeditionId: string }) {
-  const { data } = useSWR<{ items: GearItem[]; weight_summary: PackWeightSummary }>(
+  const { data } = useSWR<{ items: GearItem[]; summary: PackWeightSummary }>(
     expeditionKeys.gear(expeditionId),
     swrFetcher,
     { revalidateOnFocus: false },
   );
 
   const items = data?.items ?? [];
-  const summary = data?.weight_summary;
+  const summary = data?.summary;
 
   // Group items by category
   const byCategory = items.reduce<Record<GearCategory, GearItem[]>>(
@@ -250,13 +251,13 @@ function PackingTab({ expeditionId }: { expeditionId: string }) {
 // ---------------------------------------------------------------------------
 
 function GalleryTab({ expeditionId }: { expeditionId: string }) {
-  const { data: photos } = useSWR<GalleryPhoto[]>(
+  const { data: galleryResponse } = useSWR<{ expeditionId: string; photos: GalleryPhoto[]; totalPhotos: number }>(
     expeditionKeys.gallery(expeditionId),
     swrFetcher,
     { revalidateOnFocus: false },
   );
 
-  const items = photos ?? [];
+  const items = galleryResponse?.photos ?? [];
 
   if (items.length === 0) {
     return (
@@ -306,22 +307,24 @@ function MembersTab({ expedition }: { expedition: Expedition }) {
       transition={{ duration: 0.25 }}
     >
       <p className="text-xs font-mono uppercase tracking-wider text-muted-slate">
-        {expedition.currentParticipantsCount} / {expedition.maxParticipants} participants
+        {expedition.currentParticipantsCount ?? "—"} / {expedition.maxParticipants} participants
       </p>
       {/* Organiser row */}
-      <div className="flex items-center gap-3 py-2 border-b border-gray-100">
-        <Avatar
-          src={expedition.organizer.avatarUrl}
-          alt={expedition.organizer.displayName}
-          size="sm"
-        />
-        <div>
-          <p className="text-sm font-medium text-ink">{expedition.organizer.displayName}</p>
-          <p className="text-[10px] font-mono uppercase tracking-wider text-moss-green">Organizer</p>
+      {expedition.organizer && (
+        <div className="flex items-center gap-3 py-2 border-b border-gray-100">
+          <Avatar
+            src={expedition.organizer.avatarUrl}
+            alt={expedition.organizer.displayName}
+            size="sm"
+          />
+          <div>
+            <p className="text-sm font-medium text-ink">{expedition.organizer.displayName}</p>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-moss-green">Organizer</p>
+          </div>
         </div>
-      </div>
+      )}
       {/* Remaining placeholder member rows */}
-      {Array.from({ length: Math.max(0, expedition.currentParticipantsCount - 1) }, (_, i) => (
+      {Array.from({ length: Math.max(0, (expedition.currentParticipantsCount ?? 0) - 1) }, (_, i) => (
         <div key={i} className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
           <Avatar src={null} alt={`Participant ${i + 2}`} size="sm" />
           <div className="space-y-1">
@@ -391,20 +394,24 @@ function WorkspaceError({ onBack }: { onBack: () => void }) {
 // ---------------------------------------------------------------------------
 
 export default function ExpeditionWorkspaceView() {
-  const { currentId, goBack } = useRouter();
+  const router = useRouter();
+  const params = useParams();
   const [activeTab, setActiveTab] = useState("overview");
 
-  const expeditionId = currentId ?? "";
+  const expeditionId = (params.id as string) ?? "";
 
-  const { data: expedition, error, isLoading } = useSWR<Expedition>(
+  const { data: expeditionResponse, error, isLoading } = useSWR<ApiResponse<Expedition>>(
     expeditionId ? expeditionKeys.byId(expeditionId) : null,
     swrFetcher,
     { revalidateOnFocus: false },
   );
 
-  if (!expeditionId) return <WorkspaceError onBack={goBack} />;
+  // Unwrap the ApiResponse envelope — backend returns { success, message, data }
+  const expedition = expeditionResponse?.data;
+
+  if (!expeditionId) return <WorkspaceError onBack={() => router.back()} />;
   if (isLoading) return <WorkspaceSkeleton />;
-  if (error || !expedition) return <WorkspaceError onBack={goBack} />;
+  if (error || !expedition) return <WorkspaceError onBack={() => router.back()} />;
 
   return (
     <motion.div
@@ -415,7 +422,7 @@ export default function ExpeditionWorkspaceView() {
     >
       {/* Expedition header (cover, title, back button, status badge) */}
       <div className="container-main pt-6">
-        <ExpeditionHeader expedition={expedition} onBack={goBack} />
+        <ExpeditionHeader expedition={expedition} onBack={() => router.back()} />
       </div>
 
       {/* Tabs */}

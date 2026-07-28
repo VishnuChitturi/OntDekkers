@@ -20,7 +20,7 @@
 
 import React from "react";
 import { motion } from "motion/react";
-import { Bookmark, MessageCircle, Star, MapPin, Languages } from "lucide-react";
+import { Bookmark, Star, MapPin, Languages } from "lucide-react";
 import Avatar from "@/components/feedback/Avatar";
 import { VerificationBadge } from "@/components/feedback/Badge";
 import Button from "@/components/feedback/Button";
@@ -30,7 +30,6 @@ import type { GuideCardProps } from "./GuideCard.types";
 export default function GuideCard({
   guide,
   onBookmarkToggle,
-  onMessage,
   onClick,
   index = 0,
 }: GuideCardProps) {
@@ -53,14 +52,14 @@ export default function GuideCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0, 0, 0.2, 1], delay: index * 0.05 }}
     >
-      <BaseCard onClick={onClick} ariaLabel={`View ${guide.displayName}'s profile`}>
+      <BaseCard onClick={onClick} ariaLabel={`View ${guide.displayName ?? "Guide"}'s profile`}>
         <div className="space-y-4">
           {/* Top row: avatar + name + bookmark */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <Avatar
                 src={guide.profileImageUrl}
-                alt={guide.displayName}
+                alt={guide.displayName ?? "Guide"}
                 size="md"
               />
               <div className="min-w-0">
@@ -156,15 +155,6 @@ export default function GuideCard({
             className="flex items-center gap-2"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button
-              variant="outline"
-              size="sm"
-              icon={MessageCircle}
-              onClick={onMessage}
-              className="flex-1"
-            >
-              Message
-            </Button>
             <Button
               variant="primary"
               size="sm"

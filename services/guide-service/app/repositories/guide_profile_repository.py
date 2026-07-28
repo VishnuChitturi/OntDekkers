@@ -24,6 +24,7 @@ from typing import Optional, Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.guide_profile import GuideProfile, VerificationStatus
@@ -82,8 +83,21 @@ class GuideProfileRepository:
         *,
         include_deleted: bool = False,
     ) -> Optional[GuideProfile]:
-        """Fetch a single guide profile by primary key."""
-        stmt = select(GuideProfile).where(GuideProfile.id == profile_id)
+        """Fetch a single guide profile by primary key.
+
+        Eagerly loads locations, languages, and availability so that
+        GuideProfileResponse.model_validate() can access them outside
+        the greenlet session context without raising MissingGreenlet.
+        """
+        stmt = (
+            select(GuideProfile)
+            .where(GuideProfile.id == profile_id)
+            .options(
+                selectinload(GuideProfile.locations),
+                selectinload(GuideProfile.languages),
+                selectinload(GuideProfile.availability),
+            )
+        )
         if not include_deleted:
             stmt = stmt.where(GuideProfile.is_deleted.is_(False))
         result = await self._session.execute(stmt)
@@ -127,6 +141,11 @@ class GuideProfileRepository:
         base_stmt = (
             select(GuideProfile)
             .where(GuideProfile.is_deleted.is_(False))
+            .options(
+                selectinload(GuideProfile.locations),
+                selectinload(GuideProfile.languages),
+                selectinload(GuideProfile.availability),
+            )
         )
 
         if filters.verification_status is not None:
