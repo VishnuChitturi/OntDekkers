@@ -2,29 +2,34 @@
 # OntDekker — Frontend Dockerfile (Next.js 14)
 #
 # Multi-stage build:
-#   1. deps      — install only production dependencies
+#   1. deps      — install ALL dependencies (dev + prod) needed for the build
 #   2. builder   — build the Next.js production bundle
-#   3. runner    — minimal runtime image
+#   3. runner    — minimal runtime image (prod deps + compiled output only)
 # =============================================================================
 
-# --- Stage 1: Install dependencies -----------------------------------------
+# --- Stage 1: Install ALL dependencies (dev + prod) -------------------------
+#
+# devDependencies such as tailwindcss, postcss, typescript, and
+# eslint-config-next are required at build time by `npm run build`.
+# Using plain `npm ci` (without --only=production) installs everything.
+# The runner stage below only copies what is needed at runtime, so the
+# final image stays lean regardless.
 FROM node:20-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 # --- Stage 2: Build the application ----------------------------------------
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy production deps from previous stage
+# Copy ALL deps (including devDeps) from the previous stage
 COPY --from=deps /app/node_modules ./node_modules
-# Copy all source files
+# Copy all source files (build context is apps/web, so . is the web root)
 COPY . .
 
-# Build the Next.js production bundle (outputs to .next/standalone when
-# output: 'standalone' is enabled, otherwise standard .next build)
+# Build the Next.js production bundle
 RUN npm run build
 
 # --- Stage 3: Minimal runtime image ----------------------------------------
@@ -38,8 +43,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs
 
-# Copy the built application
-COPY --from=builder /app/public ./public 2>/dev/null || true
+# Copy only the runtime artefacts from the builder stage.
+# Note: this project has no public/ directory, so that copy is omitted.
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
