@@ -4,6 +4,7 @@ from app.repositories.auth import (
     RefreshTokenRepository,
     EmailVerificationTokenRepository,
     PasswordResetTokenRepository,
+    EmailVerificationOTPRepository,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "RefreshTokenRepository",
     "EmailVerificationTokenRepository",
     "PasswordResetTokenRepository",
+    "EmailVerificationOTPRepository",
 ]

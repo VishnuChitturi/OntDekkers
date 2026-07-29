@@ -11,6 +11,7 @@ from app.models.user import (
     RefreshToken,
     EmailVerificationToken,
     PasswordResetToken,
+    EmailVerificationOTP,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "RefreshToken",
     "EmailVerificationToken",
     "PasswordResetToken",
+    "EmailVerificationOTP",
 ]

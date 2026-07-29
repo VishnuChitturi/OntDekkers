@@ -469,8 +469,10 @@ class TestAuthServiceLogin:
     @pytest.mark.asyncio
     async def test_login_returns_access_and_refresh_tokens(self, db_session):
         from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
         svc = AuthService(db_session)
-        await svc.register("loginok@example.com", "SecurePass1!")
+        reg = await svc.register("loginok@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         result = await svc.login("loginok@example.com", "SecurePass1!")
         assert result.access_token
         assert result.refresh_token
@@ -482,8 +484,10 @@ class TestAuthServiceLogin:
         from app.services.auth import AuthService
         from app.config.settings import settings
         from shared.utils.security import decode_jwt_token
+        from app.repositories.auth import UserRepository
         svc = AuthService(db_session)
         reg = await svc.register("claims@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         result = await svc.login("claims@example.com", "SecurePass1!")
         decoded = decode_jwt_token(
             result.access_token, settings.JWT_SECRET, settings.JWT_ALGORITHM
@@ -496,9 +500,10 @@ class TestAuthServiceLogin:
     @pytest.mark.asyncio
     async def test_login_persists_refresh_token_hash(self, db_session):
         from app.services.auth import AuthService
-        from app.repositories.auth import RefreshTokenRepository
+        from app.repositories.auth import RefreshTokenRepository, UserRepository
         svc = AuthService(db_session)
-        await svc.register("rthash@example.com", "SecurePass1!")
+        reg = await svc.register("rthash@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         result = await svc.login("rthash@example.com", "SecurePass1!")
         rt = await RefreshTokenRepository(db_session).get_by_raw_token(
             result.refresh_token
@@ -549,8 +554,10 @@ class TestAuthServiceRefresh:
     @pytest.mark.asyncio
     async def test_refresh_returns_new_access_token(self, db_session):
         from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
         svc = AuthService(db_session)
-        await svc.register("ref@example.com", "SecurePass1!")
+        reg = await svc.register("ref@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         login_result = await svc.login("ref@example.com", "SecurePass1!")
         refresh_result = await svc.refresh(login_result.refresh_token)
         assert refresh_result.access_token
@@ -568,10 +575,11 @@ class TestAuthServiceRefresh:
     @pytest.mark.asyncio
     async def test_refresh_with_revoked_token_raises_unauthorized(self, db_session):
         from app.services.auth import AuthService
-        from app.repositories.auth import RefreshTokenRepository
+        from app.repositories.auth import RefreshTokenRepository, UserRepository
         from shared.exceptions import UnauthorizedException
         svc = AuthService(db_session)
-        await svc.register("revref@example.com", "SecurePass1!")
+        reg = await svc.register("revref@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         login_result = await svc.login("revref@example.com", "SecurePass1!")
         rt_repo = RefreshTokenRepository(db_session)
         rt = await rt_repo.get_by_raw_token(login_result.refresh_token)
@@ -605,9 +613,10 @@ class TestAuthServiceLogout:
     @pytest.mark.asyncio
     async def test_logout_revokes_token(self, db_session):
         from app.services.auth import AuthService
-        from app.repositories.auth import RefreshTokenRepository
+        from app.repositories.auth import RefreshTokenRepository, UserRepository
         svc = AuthService(db_session)
-        await svc.register("logout@example.com", "SecurePass1!")
+        reg = await svc.register("logout@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         login_result = await svc.login("logout@example.com", "SecurePass1!")
         await svc.logout(login_result.refresh_token)
         rt = await RefreshTokenRepository(db_session).get_by_raw_token(
@@ -626,8 +635,10 @@ class TestAuthServiceLogout:
     @pytest.mark.asyncio
     async def test_logout_is_idempotent_for_already_revoked_token(self, db_session):
         from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
         svc = AuthService(db_session)
-        await svc.register("logout2@example.com", "SecurePass1!")
+        reg = await svc.register("logout2@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         login_result = await svc.login("logout2@example.com", "SecurePass1!")
         await svc.logout(login_result.refresh_token)   # first logout
         result = await svc.logout(login_result.refresh_token)   # second logout
@@ -640,10 +651,12 @@ class TestAuthServiceGetMe:
     @pytest.mark.asyncio
     async def test_get_me_returns_user_identity(self, db_session):
         from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
         from app.config.settings import settings
         from shared.utils.security import decode_jwt_token
         svc = AuthService(db_session)
         reg = await svc.register("me@example.com", "SecurePass1!")
+        await UserRepository(db_session).mark_verified(reg.user_id)
         login_result = await svc.login("me@example.com", "SecurePass1!")
         jwt_payload = decode_jwt_token(
             login_result.access_token, settings.JWT_SECRET, settings.JWT_ALGORITHM
@@ -849,7 +862,7 @@ class TestAuthServiceVerifyEmail:
 
     @pytest.mark.asyncio
     async def test_verify_email_success(self, db_session):
-        """Valid token marks user verified and token as used."""
+        """Valid token marks user verified, sets verified_at, and marks token as used."""
         from app.services.auth import AuthService
         from app.repositories.auth import UserRepository, EmailVerificationTokenRepository
         from app.security import generate_raw_opaque_token, verification_token_expires_at
@@ -867,9 +880,10 @@ class TestAuthServiceVerifyEmail:
         result = await svc.verify_email(raw_token)
         assert "verified" in result.message.lower()
 
-        # User should now be verified
+        # User should now be verified and verified_at must be populated
         updated = await UserRepository(db_session).get_by_id(user.id)
         assert updated.is_verified is True
+        assert updated.verified_at is not None
 
     @pytest.mark.asyncio
     async def test_verify_email_marks_token_used(self, db_session):
@@ -989,6 +1003,102 @@ class TestAuthServiceVerifyEmail:
 
 
 # ===========================================================================
+# VERIFIED_AT TIMESTAMP TESTS
+# ===========================================================================
+
+class TestVerifiedAtTimestamp:
+    """[INTEGRATION] verified_at column is NULL before verification and set after."""
+
+    @pytest.mark.asyncio
+    async def test_verified_at_is_null_before_verification(self, db_session):
+        """
+        A freshly created user must have verified_at = NULL.
+
+        verified_at has no default value — it is only set by mark_verified().
+        This test confirms the column stays NULL until the verification flow
+        explicitly populates it.
+        """
+        from app.repositories.auth import UserRepository
+        from shared.utils.security import get_password_hash
+
+        user = await UserRepository(db_session).create(
+            "pre_verify@example.com", get_password_hash("P1!")
+        )
+
+        # Reload from DB to pick up the persisted state (flush writes the row)
+        fetched = await UserRepository(db_session).get_by_id(user.id)
+        assert fetched is not None
+        assert fetched.is_verified is False
+        assert fetched.verified_at is None
+
+    @pytest.mark.asyncio
+    async def test_verified_at_is_populated_after_verification(self, db_session):
+        """
+        After a successful verify_email() call, verified_at must be a non-null
+        timezone-aware UTC datetime.
+
+        This is the direct test for the mark_verified() fix: the field must
+        transition from NULL to a concrete timestamp in the same DB operation
+        that flips is_verified to True.
+        """
+        from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository, EmailVerificationTokenRepository
+        from app.security import generate_raw_opaque_token, verification_token_expires_at
+        from shared.utils.security import get_password_hash
+
+        user = await UserRepository(db_session).create(
+            "post_verify@example.com", get_password_hash("P1!")
+        )
+        raw_token = generate_raw_opaque_token()
+        await EmailVerificationTokenRepository(db_session).create(
+            user.id, raw_token, verification_token_expires_at()
+        )
+
+        # Confirm NULL before
+        pre = await UserRepository(db_session).get_by_id(user.id)
+        assert pre.verified_at is None
+
+        before_call = datetime.now(timezone.utc)
+        svc = AuthService(db_session)
+        await svc.verify_email(raw_token)
+
+        # Confirm populated after
+        post = await UserRepository(db_session).get_by_id(user.id)
+        assert post.is_verified is True
+        assert post.verified_at is not None
+        assert post.verified_at >= before_call
+
+    @pytest.mark.asyncio
+    async def test_verified_at_is_utc_timezone_aware(self, db_session):
+        """
+        verified_at must be timezone-aware (tzinfo is not None) so it can
+        be correctly compared to other UTC datetimes throughout the codebase.
+
+        PostgreSQL TIMESTAMPTZ always returns tz-aware datetimes via asyncpg.
+        This test guards against any future column-type regression.
+        """
+        from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository, EmailVerificationTokenRepository
+        from app.security import generate_raw_opaque_token, verification_token_expires_at
+        from shared.utils.security import get_password_hash
+
+        user = await UserRepository(db_session).create(
+            "tz_verify@example.com", get_password_hash("P1!")
+        )
+        raw_token = generate_raw_opaque_token()
+        await EmailVerificationTokenRepository(db_session).create(
+            user.id, raw_token, verification_token_expires_at()
+        )
+
+        svc = AuthService(db_session)
+        await svc.verify_email(raw_token)
+
+        post = await UserRepository(db_session).get_by_id(user.id)
+        assert post.verified_at is not None
+        assert post.verified_at.tzinfo is not None
+
+
+# ===========================================================================
 # FORGOT PASSWORD TESTS
 # ===========================================================================
 
@@ -1102,9 +1212,11 @@ class TestAuthServiceResetPassword:
     async def test_reset_password_new_password_authenticates(self, db_session):
         """New password authenticates successfully after reset."""
         from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
         user_id, raw_token, email = await self._setup_reset(db_session)
         svc = AuthService(db_session)
         await svc.reset_password(raw_token, "NewPass456!")
+        await UserRepository(db_session).mark_verified(user_id)
         result = await svc.login(email, "NewPass456!")
         assert result.access_token
 

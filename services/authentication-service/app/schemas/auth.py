@@ -90,6 +90,35 @@ class VerifyEmailRequest(BaseModel):
     token: str = Field(..., description="Email verification token.")
 
 
+class VerifyEmailOTPRequest(BaseModel):
+    """POST /auth/verify-email — OTP-based email verification."""
+
+    email: EmailStr = Field(..., description="The email address being verified.")
+    otp: str = Field(
+        ...,
+        min_length=6,
+        max_length=6,
+        pattern=r"^\d{6}$",
+        description="6-digit numeric OTP code from the verification email.",
+    )
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalise_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class ResendOTPRequest(BaseModel):
+    """POST /auth/resend-otp — request a fresh OTP email."""
+
+    email: EmailStr = Field(..., description="Email address for the account.")
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalise_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
 # ---------------------------------------------------------------------------
 # Response Schemas
 # ---------------------------------------------------------------------------

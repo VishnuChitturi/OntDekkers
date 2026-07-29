@@ -8,7 +8,9 @@ Public endpoints documented in 03-microservices.md:
   POST   /auth/refresh           — exchange refresh token for new access token (HTTP 200)
   POST   /auth/logout            — revoke refresh token (HTTP 200)
   GET    /auth/me                — return current user identity (HTTP 200) [requires JWT]
-  GET    /auth/verify-email      — mark email as verified (HTTP 200)
+  GET    /auth/verify-email      — mark email as verified via opaque token (HTTP 200)
+  POST   /auth/verify-email      — verify email using a 6-digit OTP (HTTP 200) [Checkpoint 4]
+  POST   /auth/resend-otp        — request a new OTP verification code (HTTP 200) [Checkpoint 4]
   POST   /auth/forgot-password   — generate password reset token (HTTP 200)
   POST   /auth/reset-password    — update password (HTTP 200)
 
@@ -24,15 +26,16 @@ API prefix resolution:
   This router is mounted at /auth in main.py.
   Traefik strips /api/v1/authentication before forwarding.
 
-Phase 1 status of each endpoint:
-  /register      — IMPLEMENTED
-  /login         — IMPLEMENTED
+Phase 1 / Checkpoint 4 status of each endpoint:
+  /register      — IMPLEMENTED + Checkpoint 4 (OTP generated, email sent)
+  /login         — IMPLEMENTED + Checkpoint 4 (email verification gate)
   /refresh       — IMPLEMENTED
   /logout        — IMPLEMENTED
   /me            — IMPLEMENTED
-  /verify-email  — IMPLEMENTED (business logic; email delivery is Phase 2)
-  /forgot-password  — IMPLEMENTED (business logic; email delivery is Phase 2)
-  /reset-password   — IMPLEMENTED (business logic; email delivery is Phase 2)
+  /verify-email  — GET: opaque token (Phase 1); POST: OTP (Checkpoint 4)
+  /resend-otp    — IMPLEMENTED (Checkpoint 4)
+  /forgot-password  — IMPLEMENTED
+  /reset-password   — IMPLEMENTED
 """
 
 import logging
@@ -49,9 +52,11 @@ from app.schemas.auth import (
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
+    ResendOTPRequest,
     ResetPasswordRequest,
     TokenResponse,
     UserIdentityResponse,
+    VerifyEmailOTPRequest,
 )
 from app.services.auth import AuthService
 
@@ -80,7 +85,7 @@ async def register(
     - Email is normalised to lowercase.
     - Password is bcrypt-hashed before storage.
     - The USER role is assigned atomically in the same transaction.
-    - An email verification token is generated (email delivery: Phase 2).
+    - An email verification token is generated and an OTP is sent via email.
     - Returns 409 if the email is already registered.
     """
     return await service.register(email=body.email, password=body.password)
@@ -104,6 +109,8 @@ async def login(
     Verify credentials and issue tokens.
 
     - Returns 401 for unknown email or wrong password (no enumeration).
+    - Returns 401 with EMAIL_NOT_VERIFIED if the account has not been
+      verified yet — user must complete OTP verification first.
     - Returns 401 if the account is inactive.
     - access_token: short-lived JWT (Bearer).
     - refresh_token: opaque high-entropy string, persisted as SHA-256 hash.
@@ -129,7 +136,6 @@ async def refresh(
     Validate the refresh token and return a new access token.
 
     - Returns 401 if the token is invalid, revoked, or expired.
-    - The refresh token itself is not rotated here.
     """
     return await service.refresh(raw_refresh_token=body.refresh_token)
 
@@ -152,9 +158,6 @@ async def logout(
     Revoke the provided refresh token.
 
     - Idempotent: revoking an already-revoked or unknown token returns 200.
-    - The corresponding access token remains valid until it expires (stateless JWT).
-      Phase 2 will add Redis-based JWT blacklisting for immediate access token
-      invalidation.
     """
     return await service.logout(raw_refresh_token=body.refresh_token)
 
@@ -177,34 +180,91 @@ async def me(
     Return the identity of the currently authenticated user.
 
     Requires a valid Bearer JWT in the Authorization header.
-    The JWT is validated by the get_current_user_payload dependency.
     """
     return await service.get_me(jwt_payload=jwt_payload)
 
 
 # ---------------------------------------------------------------------------
-# GET /auth/verify-email
+# GET /auth/verify-email  (Phase 1 — opaque token)
 # ---------------------------------------------------------------------------
 
 @router.get(
     "/verify-email",
     response_model=MessageResponse,
     status_code=status.HTTP_200_OK,
-    summary="Verify email address using a one-time token",
+    summary="Verify email address using a one-time opaque token",
 )
-async def verify_email(
+async def verify_email_token(
     token: str,
     service: AuthService = Depends(get_auth_service),
 ) -> MessageResponse:
     """
-    Verify email ownership using a one-time token.
+    Verify email ownership using a one-time opaque token (Phase 1 flow).
 
-    Phase 1: business logic is fully implemented (token validation, account
-    activation). Email delivery (sending the token to the user's inbox)
-    is Phase 2 infrastructure — no SMTP service is required to call this
-    endpoint in Phase 1 development/testing.
+    This endpoint exists for compatibility with the opaque-token email
+    verification flow implemented in Phase 1. The new OTP-based flow is
+    at POST /auth/verify-email.
     """
     return await service.verify_email(raw_token=token)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/verify-email  (Checkpoint 4 — OTP-based)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/verify-email",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify email address using a 6-digit OTP code",
+)
+async def verify_email_otp(
+    body: VerifyEmailOTPRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> MessageResponse:
+    """
+    Verify email ownership using a 6-digit OTP sent at registration or resend.
+
+    Request body:
+      - email: the address being verified
+      - otp:   the 6-digit code from the verification email
+
+    Error responses:
+      - 404 USER_NOT_FOUND           — no account with this email
+      - 409 ALREADY_VERIFIED         — email is already confirmed
+      - 401 OTP_NOT_FOUND            — no active OTP; request a resend
+      - 401 OTP_EXPIRED              — OTP TTL elapsed; request a resend
+      - 401 OTP_INVALID              — wrong code; attempts remaining
+      - 401 OTP_MAX_ATTEMPTS_EXCEEDED — too many wrong attempts; request a resend
+    """
+    return await service.verify_email_otp(email=body.email, raw_otp=body.otp)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/resend-otp  (Checkpoint 4)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/resend-otp",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Request a new OTP verification code",
+)
+async def resend_otp(
+    body: ResendOTPRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> MessageResponse:
+    """
+    Invalidate any existing OTP and generate a fresh verification code.
+
+    A new code is emailed to the provided address if the account exists and
+    is not yet verified.
+
+    Error responses:
+      - 404 USER_NOT_FOUND  — no account with this email
+      - 409 ALREADY_VERIFIED — email is already confirmed, no OTP needed
+    """
+    return await service.resend_otp(email=body.email)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +286,6 @@ async def forgot_password(
 
     - Always returns success regardless of whether the email exists
       (prevents account enumeration).
-    - Phase 1: token is generated and persisted. Email delivery is Phase 2.
     """
     return await service.forgot_password(email=body.email)
 

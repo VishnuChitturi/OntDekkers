@@ -11,6 +11,7 @@ Tables:
   - refresh_tokens      : Persisted, revocable refresh token records
   - email_verification_tokens : One-time email ownership tokens
   - password_reset_tokens     : One-time password reset tokens
+  - email_verification_otps   : Short-lived OTP records for email verification
 
 Design decisions:
   - All primary keys: UUID (server-generated via uuid4)
@@ -21,19 +22,21 @@ Design decisions:
   - Tokens are stored as SHA-256 digest (token_hash), never as raw values.
     Documentation states "Refresh tokens stored securely" without specifying the
     mechanism. Storing only the hash prevents token leakage from a DB compromise.
+  - OTP secrets are stored as hashed digests (otp_hash), never as plaintext.
   - No cross-service foreign keys. user_id in token tables references users.id
     within auth_db only.
 """
 
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
 )
@@ -81,6 +84,11 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         default=False,
         nullable=False,
     )
+    # Timestamp set when the user's email is confirmed. Null until verified.
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -108,6 +116,12 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     )
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
         "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    email_verification_otps: Mapped[List["EmailVerificationOTP"]] = relationship(
+        "EmailVerificationOTP",
         back_populates="user",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -411,4 +425,75 @@ class PasswordResetToken(Base, TimestampMixin):
         return (
             f"<PasswordResetToken id={self.id} user_id={self.user_id} "
             f"used={self.is_used}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# email_verification_otps
+# ---------------------------------------------------------------------------
+
+class EmailVerificationOTP(Base, TimestampMixin):
+    """
+    Short-lived OTP record for email address verification.
+
+    Security: the raw OTP is NEVER stored. Only the hashed digest
+    (otp_hash) is persisted, preventing OTP leakage from a DB compromise.
+
+    Lifecycle:
+      - Each OTP has a fixed expiry (expires_at).
+      - attempts tracks how many times verification was tried against this
+        record; the verification logic (Checkpoint 2) enforces a limit.
+      - Hard-deleted per architecture: expired or consumed OTPs are
+        physically removed; no soft-delete columns.
+
+    Relationship:
+      - Belongs to one User (user_id → users.id, ON DELETE CASCADE).
+      - User may have many OTP records (e.g., after resend).
+    """
+
+    __tablename__ = "email_verification_otps"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Hashed digest of the raw OTP — raw value is never stored.
+    otp_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    # Number of failed verification attempts against this OTP record.
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship(
+        "User", back_populates="email_verification_otps"
+    )
+
+    __table_args__ = (
+        # Primary lookup: find active OTP records for a given user.
+        Index("ix_email_verification_otps_user_id", "user_id"),
+        # Cleanup job: efficiently find all expired OTP records.
+        Index("ix_email_verification_otps_expires_at", "expires_at"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<EmailVerificationOTP id={self.id} user_id={self.user_id} "
+            f"expires_at={self.expires_at}>"
         )
