@@ -28,6 +28,10 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
+# Register all guide API routers
+from app.api import router as api_router  # noqa: E402 — import after app creation
+app.include_router(api_router)
+
 @app.get("/health", response_model=Dict[str, Any])
 async def health_check(db=Depends(get_db)):
     try:

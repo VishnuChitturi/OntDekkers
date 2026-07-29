@@ -162,7 +162,7 @@ describe("FollowerList — error", () => {
   });
 
   it("does not render a list on error", () => {
-    renderList({ error: new ApiError("Error", 500) });
+    renderList({ error: new ApiError(500, { success: false, message: "Error", code: "GENERIC_ERROR" }) });
 
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });

@@ -60,6 +60,104 @@ Once running, Traefik exposes microservices on port `80` using the `/api/v1/{ser
 
 ---
 
+## 💻 Local Development
+
+### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Docker Compose plugin)
+- No other tools required — everything runs inside containers.
+
+### Starting the project
+
+From a fresh clone, a single command starts the entire stack:
+
+```bash
+docker compose up --build
+```
+
+That is the only command a developer ever needs to run. Everything else happens automatically.
+
+### Expected startup flow
+
+```
+postgres          → starts, runs healthcheck
+                  → init-databases.sh creates guide_db and trip_db (first run only)
+                  → healthcheck passes
+
+guide-service     → waits for postgres healthy
+expedition-service→ waits for postgres healthy
+                  → entrypoint runs alembic upgrade head (both services)
+                  → uvicorn starts
+
+frontend          → waits for guide-service and expedition-service
+                  → Next.js production server starts on port 3000
+```
+
+Startup is **fully ordered and race-condition-free**:
+
+- PostgreSQL emits a healthcheck (`pg_isready`) before any service connects.
+- Service entrypoints poll `pg_isready` before running migrations.
+- `alembic upgrade head` is idempotent — it is a no-op if migrations are already applied.
+- No `sleep` timers anywhere in the startup chain.
+
+### Automatic database creation
+
+On the first `docker compose up` with a fresh volume, `infrastructure/postgres/init-databases.sh` is executed automatically by the PostgreSQL container. It creates:
+
+| Database   | Service             |
+|------------|---------------------|
+| `guide_db` | `guide-service`     |
+| `trip_db`  | `expedition-service`|
+
+The script is idempotent — re-running it (or restarting the container) does not fail if the databases already exist.
+
+### Automatic migrations
+
+Both `guide-service` and `expedition-service` run `alembic upgrade head` automatically at startup, before uvicorn begins accepting requests. Migrations are:
+
+- **Automatic** — no `docker compose exec` required.
+- **Idempotent** — safe to run multiple times; skipped if already at head.
+- **Ordered** — only run after PostgreSQL is confirmed ready.
+
+### Accessing the services locally
+
+| Service              | URL                                   |
+|----------------------|---------------------------------------|
+| Frontend             | http://localhost:3000                 |
+| Guide Service API    | http://localhost:8002/api/v1/guides   |
+| Expedition Service API| http://localhost:8001/api/v1/expeditions |
+| MinIO Console        | http://localhost:9001                 |
+| PostgreSQL           | `localhost:5433` (postgres / postgres)|
+
+### How to stop
+
+```bash
+docker compose down
+```
+
+This stops and removes containers but **preserves** the database volume.
+
+### How to rebuild after code changes
+
+```bash
+docker compose up --build
+```
+
+Only changed images are rebuilt.
+
+### How to completely reset (wipe all data)
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+The `-v` flag removes all named volumes, including `postgres_data`. On the next `up`, the databases and migrations are recreated from scratch automatically.
+
+> ⚠️ This deletes all local data. Use only when you need a completely clean state.
+
+---
+
 ## 📜 Git Branch Strategy
 
 OntDekker follows a **GitFlow Branching Strategy** to enable parallel development:

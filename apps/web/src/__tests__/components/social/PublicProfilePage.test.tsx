@@ -42,7 +42,7 @@ import { ApiError } from "@/services/api";
 // Mock next/navigation — useParams
 // ---------------------------------------------------------------------------
 
-const mockParamsUsername = vi.fn<[], string>(() => "explorer42");
+const mockParamsUsername = vi.fn<() => string>(() => "explorer42");
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ username: mockParamsUsername() }),
@@ -70,12 +70,9 @@ vi.mock("next/image", () => ({
 // Mock getPublicProfile, followUser, unfollowUser at the service boundary
 // ---------------------------------------------------------------------------
 
-const mockGetPublicProfile = vi.fn<
-  [string],
-  Promise<PublicProfileResponse>
->();
-const mockFollowUser = vi.fn<[string], Promise<{ message: string }>>();
-const mockUnfollowUser = vi.fn<[string], Promise<{ message: string }>>();
+const mockGetPublicProfile = vi.fn<(arg: string) => Promise<PublicProfileResponse>>();
+const mockFollowUser = vi.fn<(arg: string) => Promise<{ message: string }>>();
+const mockUnfollowUser = vi.fn<(arg: string) => Promise<{ message: string }>>();
 
 vi.mock("@/services/users", () => ({
   getPublicProfile: (...args: unknown[]) =>

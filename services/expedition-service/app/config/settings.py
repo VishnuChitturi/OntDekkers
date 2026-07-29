@@ -3,7 +3,7 @@ from shared.config import CommonSettings
 
 class Settings(CommonSettings):
     SERVICE_NAME: str = "expedition-service"
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/expedition_db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     

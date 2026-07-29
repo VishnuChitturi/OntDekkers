@@ -1,15 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+
+/* -------------------------------------------------------------------------
+   OntDekker — Global CSS
+   Tailwind v4 syntax. Design tokens below are available as CSS custom
+   properties for use outside Tailwind utility classes.
+   ------------------------------------------------------------------------- */
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-heading: var(--font-inter);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +54,7 @@
 }
 
 :root {
+  /* shadcn-style design tokens (from feature/auth-user) */
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -81,6 +87,25 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* OntDekker semantic color tokens (from develop) */
+  --color-canvas: #fbf9f4;
+  --color-ink: #0a0a0a;
+  --color-charcoal: #374151;
+  --color-muted-raw: #9ca3af;
+  --color-success: #059669;
+  --color-accent-raw: #1d4ed8;
+  --color-warning: #b45309;
+
+  /* Motion tokens (from develop) */
+  --duration-instant: 100ms;
+  --duration-responsive: 200ms;
+  --duration-medium: 300ms;
+  --duration-intimate: 450ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .dark {
@@ -121,10 +146,87 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
+
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    line-height: 1.6;
+  }
+
+  /* Headings — ink color, tight tracking */
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--color-ink);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  /* Focus ring — ring-black per design spec */
+  *:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Remove default button/input outlines — replaced by focus-visible above */
+  button, input, select, textarea {
+    outline: none;
+  }
+
+  /* Slim scrollbar on webkit */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 9999px;
+  }
+}
+
+@layer components {
+  /* Centred content container */
+  .container-main {
+    @apply max-w-5xl mx-auto px-6;
+  }
+
+  /* Standard card surface */
+  .card-surface {
+    @apply bg-white border border-gray-100 rounded-3xl;
+  }
+
+  /* Glassmorphism — sticky headers and floating navs only */
+  .glass {
+    @apply bg-white/80 backdrop-blur-md border-b border-gray-100;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar while keeping scroll functionality (tab overflow) */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Respect reduced-motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

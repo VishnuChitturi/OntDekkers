@@ -37,7 +37,7 @@ import { ApiError } from "@/services/api";
 // Mock next/navigation — useSearchParams
 // ---------------------------------------------------------------------------
 
-const mockSearchParamsGet = vi.fn<[string], string | null>();
+const mockSearchParamsGet = vi.fn<(arg: string) => string | null>();
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockSearchParamsGet }),
@@ -49,7 +49,7 @@ vi.mock("next/navigation", () => ({
 // Mock verifyEmail at the service boundary
 // ---------------------------------------------------------------------------
 
-const mockVerifyEmail = vi.fn<[string], Promise<{ message: string }>>();
+const mockVerifyEmail = vi.fn<(arg: string) => Promise<{ message: string }>>();
 
 vi.mock("@/services/auth", () => ({
   verifyEmail: (...args: unknown[]) => mockVerifyEmail(...(args as [string])),

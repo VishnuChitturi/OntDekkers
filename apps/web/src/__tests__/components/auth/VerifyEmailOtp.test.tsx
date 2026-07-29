@@ -41,7 +41,7 @@
  *  - verifyEmail from @/services/auth (for the legacy token flow)
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   render,
   screen,
@@ -59,7 +59,7 @@ import { ApiError } from "@/services/api";
 // ---------------------------------------------------------------------------
 
 const mockReplace = vi.fn();
-const mockSearchParamsGet = vi.fn<[string], string | null>();
+const mockSearchParamsGet = vi.fn<(arg: string) => string | null>();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mockReplace }),
@@ -82,7 +82,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 // Mock verifyEmail (legacy token flow — service boundary)
 // ---------------------------------------------------------------------------
 
-const mockVerifyEmail = vi.fn<[string], Promise<{ message: string }>>();
+const mockVerifyEmail = vi.fn<(arg: string) => Promise<{ message: string }>>();
 
 vi.mock("@/services/auth", () => ({
   verifyEmail: (...args: unknown[]) => mockVerifyEmail(...(args as [string])),
