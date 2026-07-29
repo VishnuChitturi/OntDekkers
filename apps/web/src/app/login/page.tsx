@@ -41,19 +41,23 @@ function LoginForm() {
   const searchParams = useSearchParams();
 
   const justRegistered = searchParams.get("registered") === "1";
+  const justVerified = searchParams.get("verified") === "1";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Redirect already-authenticated users away from the login screen
+  // Redirect already-authenticated users away from the login screen.
+  // Exception: skip the redirect when ?verified=1 is present — the user
+  // was sent here intentionally after OTP verification and must be allowed
+  // to sign in even if a prior session is still active in localStorage.
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
+    if (!authLoading && isAuthenticated && !justVerified) {
       const redirectTo = getSafeRedirect(searchParams.get("redirect"));
       router.replace(redirectTo);
     }
-  }, [isAuthenticated, authLoading, router, searchParams]);
+  }, [isAuthenticated, authLoading, router, searchParams, justVerified]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -93,6 +97,16 @@ function LoginForm() {
           className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-[#0F5132]"
         >
           Account created. Sign in to continue.
+        </div>
+      )}
+
+      {/* Post-verification success banner */}
+      {justVerified && !justRegistered && !error && (
+        <div
+          role="status"
+          className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-[#0F5132]"
+        >
+          Email verified. Sign in to continue.
         </div>
       )}
 
