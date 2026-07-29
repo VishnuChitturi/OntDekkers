@@ -176,4 +176,46 @@ export const authHandlers = {
         { status }
       )
     ),
+
+  // ---------------------------------------------------------------------------
+  // Checkpoint 4 — OTP-based email verification
+  // ---------------------------------------------------------------------------
+
+  /** POST /auth/verify-email → 200 MessageResponse (OTP flow) */
+  verifyEmailOtpSuccess: (message = "Email verified successfully.") =>
+    http.post(`${BASE}/auth/verify-email`, () =>
+      HttpResponse.json({ message })
+    ),
+
+  /** POST /auth/verify-email → error (OTP flow) */
+  verifyEmailOtpFailure: (
+    status = 401,
+    message = "Incorrect OTP. Please try again.",
+    code = "OTP_INVALID"
+  ) =>
+    http.post(`${BASE}/auth/verify-email`, () =>
+      HttpResponse.json(
+        { success: false, message, code },
+        { status }
+      )
+    ),
+
+  /** POST /auth/resend-otp → 200 MessageResponse */
+  resendOtpSuccess: (message = "A new verification code has been sent to your email address.") =>
+    http.post(`${BASE}/auth/resend-otp`, () =>
+      HttpResponse.json({ message })
+    ),
+
+  /** POST /auth/resend-otp → error (e.g. 404 user not found, 409 already verified) */
+  resendOtpFailure: (
+    status = 404,
+    message = "No account found with this email address.",
+    code = "USER_NOT_FOUND"
+  ) =>
+    http.post(`${BASE}/auth/resend-otp`, () =>
+      HttpResponse.json(
+        { success: false, message, code },
+        { status }
+      )
+    ),
 };

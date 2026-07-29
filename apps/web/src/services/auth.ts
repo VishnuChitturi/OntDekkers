@@ -81,6 +81,17 @@ export interface ResetPasswordRequest {
   new_password: string;
 }
 
+// Checkpoint 4 — OTP-based email verification
+
+export interface VerifyEmailOtpRequest {
+  email: string;
+  otp: string;
+}
+
+export interface ResendOtpRequest {
+  email: string;
+}
+
 // ---------------------------------------------------------------------------
 // API Functions
 // ---------------------------------------------------------------------------
@@ -190,6 +201,48 @@ export async function resetPassword(
 ): Promise<MessageResponse> {
   const response = await authHttp.post<MessageResponse>(
     "/auth/reset-password",
+    data
+  );
+  return response.data;
+}
+
+/**
+ * POST /auth/verify-email
+ *
+ * Verify email address using a 6-digit OTP submitted by the user.
+ * Checkpoint 4 — OTP-based flow (distinct from the opaque-token GET flow).
+ *
+ * Returns 200 on success.
+ * Returns 401 for invalid/expired OTP or max attempts exceeded.
+ * Returns 404 if the email is not registered.
+ * Returns 409 if the email is already verified.
+ */
+export async function verifyEmailOtp(
+  data: VerifyEmailOtpRequest
+): Promise<MessageResponse> {
+  const response = await authHttp.post<MessageResponse>(
+    "/auth/verify-email",
+    data
+  );
+  return response.data;
+}
+
+/**
+ * POST /auth/resend-otp
+ *
+ * Request a fresh verification OTP for the given email address.
+ * Invalidates any previously issued OTP for that user.
+ * Checkpoint 4 — used when the original OTP was not received or has expired.
+ *
+ * Returns 200 on success.
+ * Returns 404 if the email is not registered.
+ * Returns 409 if the email is already verified.
+ */
+export async function resendOtp(
+  data: ResendOtpRequest
+): Promise<MessageResponse> {
+  const response = await authHttp.post<MessageResponse>(
+    "/auth/resend-otp",
     data
   );
   return response.data;

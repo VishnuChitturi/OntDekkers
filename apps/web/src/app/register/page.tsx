@@ -7,8 +7,8 @@
  * Password minimum: 8 characters (enforced by backend, validated client-side).
  * Password confirmation: UI-only — not sent to backend.
  *
- * After successful registration navigates to /login with a success message
- * stored in the URL so login can surface it without extra state.
+ * After successful registration navigates to /verify-email?email=<encoded>
+ * so the verify-email page can display which address the OTP was sent to.
  *
  * Does NOT call the auth service directly — uses register() from auth.ts
  * directly since AuthContext does not expose a register method (registration
@@ -58,8 +58,9 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       await register({ email: email.trim(), password });
-      // Navigate to login — include a registered flag so login can show confirmation
-      router.push("/login?registered=1");
+      // Navigate to verify-email — pass the registered address so the page
+      // can display it without needing global state.
+      router.push(`/verify-email?email=${encodeURIComponent(email.trim())}`);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

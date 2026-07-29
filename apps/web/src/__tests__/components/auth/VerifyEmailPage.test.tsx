@@ -5,16 +5,20 @@
  * Tests observable behavior only — no implementation internals.
  *
  * The page wraps a VerifyEmailContent child inside <Suspense>. That child
- * calls useSearchParams() to read the `token` query parameter and then fires
- * verifyEmail(token) once on mount (guarded by a useRef to survive React
- * StrictMode double-mount).
+ * calls useSearchParams() to read `token` and `email` query parameters.
+ *
+ * Entry points:
+ *   ?token=<opaque> → auto-verifies on mount (existing flow)
+ *   ?email=<addr>   → awaiting-otp: shows which address received the code
+ *   neither         → no-token fallback
  *
  * Coverage:
- *   1. No-token state  — URL missing `token` param
- *   2. Loading state   — verifyEmail() is pending
- *   3. Success state   — verifyEmail() resolves
- *   4. Error state     — verifyEmail() rejects (ApiError + generic)
+ *   1. No-token state    — URL missing both token and email params
+ *   2. Loading state     — verifyEmail() is pending (token flow)
+ *   3. Success state     — verifyEmail() resolves (token flow)
+ *   4. Error state       — verifyEmail() rejects (ApiError + generic)
  *   5. Double-call protection — verifyEmail() called at most once per mount
+ *   6. Awaiting-OTP state — email present, no token (post-registration)
  *
  * Mocks:
  *   - next/navigation useSearchParams
@@ -52,6 +56,17 @@ vi.mock("@/services/auth", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock AuthContext — required by the OtpForm sub-component in awaiting-otp
+// ---------------------------------------------------------------------------
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({
+    verifyEmailOtp: vi.fn(),
+    resendOtp: vi.fn(),
+  }),
+}));
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
@@ -76,16 +91,16 @@ describe("VerifyEmailPage — no token", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a Back-to-sign-in link when token is absent", async () => {
+  it("shows a Back-to-register link when both token and email are absent", async () => {
     mockSearchParamsGet.mockReturnValue(null);
 
     render(<VerifyEmailPage />);
 
-    await screen.findByRole("link", { name: /back to sign in/i });
+    await screen.findByRole("link", { name: /back to register/i });
 
     expect(
-      screen.getByRole("link", { name: /back to sign in/i })
-    ).toHaveAttribute("href", "/login");
+      screen.getByRole("link", { name: /back to register/i })
+    ).toHaveAttribute("href", "/register");
   });
 
   it("does NOT call verifyEmail when token is absent", async () => {
@@ -261,5 +276,56 @@ describe("VerifyEmailPage — double-call protection", () => {
     await waitFor(() => {
       expect(mockVerifyEmail).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Awaiting-OTP state (Checkpoint 5.2 — post-registration)
+// ---------------------------------------------------------------------------
+
+describe("VerifyEmailPage — awaiting-otp (email param, no token)", () => {
+  beforeEach(() => {
+    // token → null, email → the registered address
+    mockSearchParamsGet.mockImplementation((key: string) => {
+      if (key === "email") return "user@example.com";
+      return null; // token
+    });
+  });
+
+  it("renders the 'We sent a verification code to' message", async () => {
+    render(<VerifyEmailPage />);
+
+    await screen.findByText(/we sent a verification code to/i);
+
+    expect(
+      screen.getByText(/we sent a verification code to/i)
+    ).toBeInTheDocument();
+  });
+
+  it("displays the email address from the query parameter", async () => {
+    render(<VerifyEmailPage />);
+
+    await screen.findByText("user@example.com");
+
+    expect(screen.getByText("user@example.com")).toBeInTheDocument();
+  });
+
+  it("does NOT call verifyEmail in awaiting-otp state", async () => {
+    render(<VerifyEmailPage />);
+
+    await screen.findByText(/we sent a verification code to/i);
+
+    expect(mockVerifyEmail).not.toHaveBeenCalled();
+  });
+
+  it("shows the OTP input form in awaiting-otp state", async () => {
+    render(<VerifyEmailPage />);
+
+    // The OTP form is shown — verify button confirms it
+    await screen.findByRole("button", { name: /^verify$/i });
+
+    expect(
+      screen.getByRole("button", { name: /^verify$/i })
+    ).toBeInTheDocument();
   });
 });

@@ -36,7 +36,12 @@ import {
   login as authLogin,
   logout as authLogout,
   refresh as authRefresh,
+  verifyEmailOtp as authVerifyEmailOtp,
+  resendOtp as authResendOtp,
+  type MessageResponse,
   type UserIdentityResponse,
+  type VerifyEmailOtpRequest,
+  type ResendOtpRequest,
 } from "@/services/auth";
 
 // ---------------------------------------------------------------------------
@@ -82,6 +87,10 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
+  /** Checkpoint 4: verify email using a 6-digit OTP (POST /auth/verify-email). */
+  verifyEmailOtp: (data: VerifyEmailOtpRequest) => Promise<MessageResponse>;
+  /** Checkpoint 4: request a new OTP for the given email (POST /auth/resend-otp). */
+  resendOtp: (data: ResendOtpRequest) => Promise<MessageResponse>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -173,6 +182,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // verifyEmailOtp (Checkpoint 4)
+  // ---------------------------------------------------------------------------
+
+  const verifyEmailOtp = useCallback(
+    async (data: VerifyEmailOtpRequest): Promise<MessageResponse> => {
+      return authVerifyEmailOtp(data);
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
+  // resendOtp (Checkpoint 4)
+  // ---------------------------------------------------------------------------
+
+  const resendOtp = useCallback(
+    async (data: ResendOtpRequest): Promise<MessageResponse> => {
+      return authResendOtp(data);
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
   // Context value
   // ---------------------------------------------------------------------------
 
@@ -182,6 +213,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     login,
     logout,
+    verifyEmailOtp,
+    resendOtp,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

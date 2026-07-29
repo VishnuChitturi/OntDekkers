@@ -4,7 +4,11 @@ from jose import JWTError
 from typing import AsyncGenerator, Optional, Dict, Any
 import uuid
 
-from shared.exceptions import UnauthorizedException, ForbiddenException
+from shared.exceptions import (
+    OntDekkerException,
+    UnauthorizedException,
+    ForbiddenException,
+)
 from shared.utils.security import decode_jwt_token
 from shared.logging import request_id_ctx, correlation_id_ctx
 from shared.config import get_common_settings
@@ -14,11 +18,18 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     sessionmaker = getattr(request.app.state, "db_sessionmaker", None)
     if sessionmaker is None:
         raise RuntimeError("Database sessionmaker is not configured on app state.")
-        
+
     async with sessionmaker() as session:
         try:
             yield session
             await session.commit()
+        except OntDekkerException:
+            # OntDekkerException subclasses (UnauthorizedException, NotFoundException,
+            # ConflictException, etc.) are intentional HTTP error responses, not DB
+            # errors. The DB writes made before the exception (e.g. increment_attempts
+            # on a failed OTP check) must be committed so they are not lost.
+            await session.commit()
+            raise
         except Exception:
             await session.rollback()
             raise

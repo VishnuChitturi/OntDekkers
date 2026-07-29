@@ -219,7 +219,7 @@ describe("RegisterPage — successful registration", () => {
     });
   });
 
-  it("navigates to /login?registered=1 after successful registration", async () => {
+  it("navigates to /verify-email?email=<encoded> after successful registration", async () => {
     const user = userEvent.setup();
     render(<RegisterPage />);
 
@@ -229,7 +229,9 @@ describe("RegisterPage — successful registration", () => {
     await user.click(screen.getByRole("button", { name: /create account/i }));
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("/login?registered=1");
+      expect(mockPush).toHaveBeenCalledWith(
+        `/verify-email?email=${encodeURIComponent("user@example.com")}`
+      );
     });
   });
 
@@ -289,7 +291,7 @@ describe("RegisterPage — registration failure", () => {
     );
   });
 
-  it("does not navigate to /login?registered=1 after a failed registration", async () => {
+  it("does not navigate to /verify-email after a failed registration", async () => {
     mockRegister.mockRejectedValue(
       new ApiError(409, {
         success: false,
