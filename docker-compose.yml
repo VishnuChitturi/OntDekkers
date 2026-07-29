@@ -5,20 +5,37 @@ services:
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:v2.10
+    # Static configuration is loaded from platform/gateway/traefik.yml.
+    # Dynamic routing rules (routers/services/middlewares) live in
+    # platform/gateway/dynamic.yml and are watched for hot-reload.
+    #
+    # File provider is used instead of Docker provider because Docker Desktop
+    # on macOS does not reliably expose a connectable Docker socket inside
+    # containers (bind-mounted socket cannot be opened from within the VM).
+    #
+    # Routing contract (team_guidelines.md — /api/v1/{service-name}/* standard):
+    #   http://localhost/api/v1/authentication/* → authentication-service:8000
+    #   http://localhost/api/v1/user/*           → user-service:8000
+    volumes:
+      - ./platform/gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./platform/gateway/dynamic.yml:/etc/traefik/dynamic.yml:ro
     ports:
       - "80:80"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default
+      - ontdekker-gateway
 
   # ---------------------------------------------------------------------------
   # PostgreSQL
   #
-  # The init-databases.sh script is mounted into docker-entrypoint-initdb.d/.
-  # The postgres image runs every .sh file in that directory automatically on
-  # a fresh volume, creating guide_db and trip_db before any service connects.
+  # Both init scripts are mounted into docker-entrypoint-initdb.d/ and run
+  # in alphabetical order on a fresh volume:
+  #   00-init.sql             — creates auth_db, user_db  (Developer 1)
+  #   init-databases.sh       — creates guide_db, trip_db (Developer 3)
   #
   # The healthcheck uses pg_isready so downstream services only start after
   # PostgreSQL is actually accepting connections — no sleep timers needed.
+  # Host port 5433 is used to avoid conflicts with any local PostgreSQL instance.
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
@@ -29,6 +46,7 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
       - ./infrastructure/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -54,19 +72,19 @@ services:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
-      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
 
   # ---------------------------------------------------------------------------
   # MinIO object storage
@@ -76,22 +94,99 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
     command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    # NOTE: The minio/minio image does not ship curl, wget, or mc.
+    # A reliable HTTP-based healthcheck is therefore not possible without
+    # adding an external tool to the image. The user-service relies on
+    # init_minio() in its lifespan startup, which is idempotent and will
+    # fail fast with a clear S3Error if MinIO is not yet ready.
+
+  # ---------------------------------------------------------------------------
+  # Authentication Service
+  #
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8000: retained for Phase 1 direct access while Traefik is
+  #   being validated.
+  # Gateway routing: http://localhost/api/v1/authentication/*
+  # ---------------------------------------------------------------------------
+  authentication-service:
+    build:
+      context: .
+      dockerfile: services/authentication-service/Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - default
+      - ontdekker-gateway
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/auth_db
+      JWT_SECRET: dev_secret_key_replace_this_in_production
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_URL: kafka:29092
+      ENVIRONMENT: development
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
+
+  # ---------------------------------------------------------------------------
+  # User Service
+  #
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8001: retained for Phase 1 direct access while Traefik is
+  #   being validated.
+  # Gateway routing: http://localhost/api/v1/user/*
+  # ---------------------------------------------------------------------------
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    ports:
+      - "8001:8000"
+    networks:
+      - default
+      - ontdekker-gateway
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      JWT_SECRET: dev_secret_key_replace_this_in_production
+      JWT_ALGORITHM: HS256
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_URL: kafka:29092
+      ENVIRONMENT: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_PROFILES: profiles
+      MINIO_MAX_FILE_SIZE: 5242880
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
 
   # ---------------------------------------------------------------------------
   # Expedition Service
-  #
-  # Depends on postgres being healthy (not just started) so the entrypoint's
-  # pg_isready check and alembic migration run only once PG is ready.
-  # restart: on-failure handles the unlikely race where PG accepts the
-  # healthcheck but isn't yet ready for application connections.
   # ---------------------------------------------------------------------------
   expedition-service:
     build:
       context: .
       dockerfile: services/expedition-service/Dockerfile
     ports:
-      - "8001:8000"
+      - "8003:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
       ENVIRONMENT: development
@@ -103,8 +198,6 @@ services:
 
   # ---------------------------------------------------------------------------
   # Guide Service
-  #
-  # Same pattern as expedition-service.
   # ---------------------------------------------------------------------------
   guide-service:
     build:
@@ -123,9 +216,6 @@ services:
 
   # ---------------------------------------------------------------------------
   # Frontend — Next.js web application
-  #
-  # Built from the apps/web directory. Depends on both backend services being
-  # up so API calls on first load find the services ready.
   # ---------------------------------------------------------------------------
   frontend:
     build:
@@ -134,13 +224,26 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost
     depends_on:
       - guide-service
       - expedition-service
+      - authentication-service
+      - user-service
 
 # ---------------------------------------------------------------------------
 # Named volumes
 # ---------------------------------------------------------------------------
 volumes:
   postgres_data:
+  minio_data:
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+# ontdekker-gateway: shared overlay used by Traefik and the microservices it
+# routes. Services not exposed via Traefik do not need to join it.
+# ---------------------------------------------------------------------------
+networks:
+  ontdekker-gateway:
+    driver: bridge

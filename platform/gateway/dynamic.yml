@@ -1,0 +1,69 @@
+# Traefik Dynamic Configuration — OntDekker Local Development
+#
+# Routing contract (team_guidelines.md — /api/v1/{service-name}/* standard):
+#
+#   Authentication Service
+#     External:  http://localhost/api/v1/authentication/*
+#     Stripped:  /api/v1/authentication
+#     Internal:  http://authentication-service:8000/auth/*
+#     (FastAPI router mounted at prefix="/auth")
+#
+#   User Service
+#     External:  http://localhost/api/v1/user/*
+#     Stripped:  /api/v1/user
+#     Internal:  http://user-service:8000/users/*
+#     (FastAPI router mounted at prefix="/users")
+#
+# Container hostnames resolve via Docker Compose's internal DNS
+# (services share the default Compose network with Traefik).
+
+http:
+
+  # ── Routers ───────────────────────────────────────────────────────────────
+  routers:
+
+    auth-service:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/v1/authentication`)"
+      middlewares:
+        - auth-strip
+      service: auth-service
+
+    user-service:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/v1/user`)"
+      middlewares:
+        - user-strip
+      service: user-service
+
+  # ── Middlewares ────────────────────────────────────────────────────────────
+  middlewares:
+
+    auth-strip:
+      stripPrefix:
+        prefixes:
+          - "/api/v1/authentication"
+
+    user-strip:
+      stripPrefix:
+        prefixes:
+          - "/api/v1/user"
+
+  # ── Services ──────────────────────────────────────────────────────────────
+  services:
+
+    auth-service:
+      loadBalancer:
+        servers:
+          # Traefik reaches authentication-service over the shared Compose network.
+          # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
+          - url: "http://authentication-service:8000"
+
+    user-service:
+      loadBalancer:
+        servers:
+          # Traefik reaches user-service over the shared Compose network.
+          # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
+          - url: "http://user-service:8000"

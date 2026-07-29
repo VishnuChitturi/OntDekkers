@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import "./globals.css";
+import { Providers } from "@/components/providers";
 import { AppStateProvider } from "@/contexts/AppStateProvider";
 import { ToastProvider } from "@/components/overlays/Toast";
+import "./globals.css";
 
 // ---------------------------------------------------------------------------
-// Fonts — loaded via next/font for zero layout shift and self-hosting
+// Fonts — loaded via next/font for zero layout shift and self-hosting.
+// --font-inter and --font-jetbrains-mono are consumed in globals.css @theme.
 // ---------------------------------------------------------------------------
 
 const inter = Inter({
@@ -40,6 +42,11 @@ export const metadata: Metadata = {
 
 // ---------------------------------------------------------------------------
 // Root layout
+//
+// Provider nesting (outer → inner):
+//   Providers          — QueryClientProvider + AuthProvider (feature/auth-user)
+//     AppStateProvider — Global guide/expedition/user state (develop)
+//       ToastProvider  — useToast() for any descendant component (develop)
 // ---------------------------------------------------------------------------
 
 export default function RootLayout({
@@ -53,16 +60,14 @@ export default function RootLayout({
       className={`${inter.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="min-h-screen bg-canvas antialiased">
-        {/*
-         * AppStateProvider — global state for guides, expeditions, and auth.
-         * ToastProvider    — enables useToast() in any descendant component.
-         */}
-        <AppStateProvider>
-          <ToastProvider>
-            {children}
-          </ToastProvider>
-        </AppStateProvider>
+      <body className="min-h-screen bg-background antialiased">
+        <Providers>
+          <AppStateProvider>
+            <ToastProvider>
+              {children}
+            </ToastProvider>
+          </AppStateProvider>
+        </Providers>
       </body>
     </html>
   );

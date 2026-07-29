@@ -89,13 +89,9 @@ function Toast({ toast, onDismiss }: ToastProps) {
         styles.border,
       ].join(" ")}
       initial={{ opacity: 0, y: 24, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 8, scale: 0.97 }}
-      transition={{
-        enter: { duration: 0.25, ease: [0, 0, 0.2, 1] },
-        exit: { duration: 0.2, ease: [0.4, 0, 1, 1] },
-        layout: { duration: 0.2 },
-      }}
+      animate={{ opacity: 1, y: 0, scale: 1, transition: { duration: 0.25, ease: [0, 0, 0.2, 1] } }}
+      exit={{ opacity: 0, y: 8, scale: 0.97, transition: { duration: 0.2, ease: [0.4, 0, 1, 1] } }}
+      transition={{ layout: { duration: 0.2 } }}
     >
       {/* Type icon */}
       <Icon
