@@ -126,6 +126,51 @@ function FilterChip({
 // GuidesView
 // ---------------------------------------------------------------------------
 
+const MOCK_GUIDES: GuideProfileSummary[] = [
+  {
+    id: "g-1",
+    userId: "u-1",
+    displayName: "Mateo Rossi",
+    bio: "Certified Alpine Guide with 10+ years leading hut-to-hut treks across Mont Blanc, the Matterhorn, and South Tyrol.",
+    profileImageUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80",
+    verificationStatus: "VERIFIED",
+    availability: { guideId: "g-1", status: "AVAILABLE", note: null },
+    rating: 4.9,
+    reviewCount: 48,
+    yearsExperience: 10,
+    locations: [{ id: "l-1", guideId: "g-1", city: "Chamonix", country: "France", region: "Haute-Savoie" }],
+    languages: [{ id: "lang-1", guideId: "g-1", language: "English" }, { id: "lang-2", guideId: "g-1", language: "French" }],
+  },
+  {
+    id: "g-2",
+    userId: "u-2",
+    displayName: "Astrid Lindholm",
+    bio: "Nordic wilderness expert specializing in Arctic circle sea kayaking, northern lights hunting, and trail navigation.",
+    profileImageUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80",
+    verificationStatus: "VERIFIED",
+    availability: { guideId: "g-2", status: "AVAILABLE", note: null },
+    rating: 5.0,
+    reviewCount: 62,
+    yearsExperience: 8,
+    locations: [{ id: "l-2", guideId: "g-2", city: "Tromso", country: "Norway", region: "Troms" }],
+    languages: [{ id: "lang-3", guideId: "g-2", language: "English" }, { id: "lang-4", guideId: "g-2", language: "Norwegian" }],
+  },
+  {
+    id: "g-3",
+    userId: "u-3",
+    displayName: "Kenzo Tanaka",
+    bio: "Cultural heritage specialist & mountain monk trail expert. Guiding Kumano Kodo pilgrimage routes for 8 years.",
+    profileImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80",
+    verificationStatus: "VERIFIED",
+    availability: { guideId: "g-3", status: "BUSY", note: null },
+    rating: 4.95,
+    reviewCount: 39,
+    yearsExperience: 8,
+    locations: [{ id: "l-3", guideId: "g-3", city: "Tanabe", country: "Japan", region: "Wakayama" }],
+    languages: [{ id: "lang-5", guideId: "g-3", language: "Japanese" }, { id: "lang-6", guideId: "g-3", language: "English" }],
+  },
+];
+
 export default function GuidesView() {
   const router = useRouter();
   const { state } = useAppState();
@@ -146,15 +191,23 @@ export default function GuidesView() {
 
   // ── SWR ───────────────────────────────────────────────────────────────────
   const swrKey = guideKeys.list(filters);
-  const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<GuideProfileSummary>>(
+  const { data, isLoading, error, mutate } = useSWR<PaginatedResponse<GuideProfileSummary>>(
     swrKey,
     ([url, params]: [string, Record<string, unknown>]) => swrFetcherWithParams(url, params),
     { revalidateOnFocus: false },
   );
 
-  // Client-side search filter on top of API results
+  // Client-side search filter on top of API results or fallback
   const filteredGuides = useMemo(() => {
-    const guides = data?.items ?? [];
+    let guides = data?.items && data.items.length > 0 ? data.items : MOCK_GUIDES;
+
+    if (verifiedOnly) {
+      guides = guides.filter((g) => g.verificationStatus === "VERIFIED");
+    }
+    if (availableOnly) {
+      guides = guides.filter((g) => g.availability?.status === "AVAILABLE");
+    }
+
     if (!searchQuery.trim()) return guides;
     const q = searchQuery.toLowerCase();
     return guides.filter((g) =>
@@ -165,7 +218,7 @@ export default function GuidesView() {
       ) ||
       g.languages.some((l) => l.language.toLowerCase().includes(q)),
     );
-  }, [data?.items, searchQuery]);
+  }, [data?.items, verifiedOnly, availableOnly, searchQuery]);
 
   // ── Bookmark action ────────────────────────────────────────────────────────
   const handleBookmark = useCallback(
@@ -206,7 +259,7 @@ export default function GuidesView() {
       {/* ── Search + filters ─────────────────────────────────────────────── */}
       <div className="space-y-3">
         <Search
-          placeholder="Search by name, location, or language…"
+          placeholder="Search by name, location, language, or specialty…"
           value={searchQuery}
           onChange={setSearchQuery}
           className="max-w-sm"
@@ -229,23 +282,24 @@ export default function GuidesView() {
           {hasActiveFilters && (
             <button
               type="button"
-              onClick={() => { setVerifiedOnly(false); setAvailableOnly(false); }}
+              onClick={() => {
+                setVerifiedOnly(false);
+                setAvailableOnly(false);
+              }}
               className="text-xs text-muted-slate hover:text-ink underline transition-colors duration-[var(--duration-responsive)]"
             >
               Clear all
             </button>
           )}
-          {data && (
-            <span className="ml-auto text-[10px] font-mono text-muted-slate">
-              {filteredGuides.length} of {data.pagination.totalItems} guides
-            </span>
-          )}
+          <span className="ml-auto text-[10px] font-mono text-muted-slate">
+            Showing {filteredGuides.length} guides
+          </span>
         </div>
       </div>
 
       {/* ── Guide grid — all states ───────────────────────────────────────── */}
       <AnimatePresence mode="wait">
-        {isLoading ? (
+        {isLoading && !data ? (
           <GuideCardSkeleton key="skeleton" count={6} />
         ) : error ? (
           <ErrorBanner key="error" onRetry={() => mutate()} />

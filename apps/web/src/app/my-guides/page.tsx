@@ -1,3 +1,4 @@
+import { AppLayout } from "@/components/navigation/AppLayout";
 import MyGuidesView from "@/views/Guides/MyGuides/MyGuidesView";
 
 export const metadata = {
@@ -6,5 +7,9 @@ export const metadata = {
 };
 
 export default function MyGuidesPage() {
-  return <MyGuidesView />;
+  return (
+    <AppLayout>
+      <MyGuidesView />
+    </AppLayout>
+  );
 }

@@ -193,7 +193,7 @@ describe("LoginPage — successful login", () => {
     });
   });
 
-  it("navigates to '/' when no redirect param is present", async () => {
+  it("navigates to '/feed' when no redirect param is present", async () => {
     const user = userEvent.setup();
     renderLogin();
 
@@ -202,7 +202,7 @@ describe("LoginPage — successful login", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/");
+      expect(mockReplace).toHaveBeenCalledWith("/feed");
     });
   });
 
@@ -222,7 +222,7 @@ describe("LoginPage — successful login", () => {
     });
   });
 
-  it("falls back to '/' for an unsafe open-redirect value (//evil.com)", async () => {
+  it("falls back to '/feed' for an unsafe open-redirect value (//evil.com)", async () => {
     mockSearchParamsGet.mockImplementation((key: string) =>
       key === "redirect" ? "//evil.com" : null
     );
@@ -234,11 +234,11 @@ describe("LoginPage — successful login", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/");
+      expect(mockReplace).toHaveBeenCalledWith("/feed");
     });
   });
 
-  it("falls back to '/' for an absolute URL redirect value", async () => {
+  it("falls back to '/feed' for an absolute URL redirect value", async () => {
     mockSearchParamsGet.mockImplementation((key: string) =>
       key === "redirect" ? "https://evil.com/steal" : null
     );
@@ -250,7 +250,7 @@ describe("LoginPage — successful login", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/");
+      expect(mockReplace).toHaveBeenCalledWith("/feed");
     });
   });
 });
@@ -319,7 +319,7 @@ describe("LoginPage — login failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("LoginPage — already-authenticated redirect", () => {
-  it("redirects to '/' when user is already authenticated and auth is not loading", async () => {
+  it("redirects to '/feed' when user is already authenticated and auth is not loading", async () => {
     mockUseAuth.mockReturnValue({
       login: mockLogin,
       isAuthenticated: true,
@@ -329,7 +329,7 @@ describe("LoginPage — already-authenticated redirect", () => {
     renderLogin();
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/");
+      expect(mockReplace).toHaveBeenCalledWith("/feed");
     });
   });
 

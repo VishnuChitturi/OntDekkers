@@ -132,7 +132,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       KAFKA_URL: kafka:29092
       ENVIRONMENT: development
-      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      ALLOWED_ORIGINS: '["http://localhost:3000", "http://localhost", "http://127.0.0.1:3000", "http://127.0.0.1"]'
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_USERNAME: prajwaln0911@gmail.com
+      SMTP_PASSWORD: icwotdwfyjziemxr
+      SMTP_FROM_EMAIL: prajwaln0911@gmail.com
+      SMTP_FROM_NAME: OntDekker
+      SMTP_USE_TLS: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,7 +176,7 @@ services:
       MINIO_USE_SSL: "false"
       MINIO_BUCKET_PROFILES: profiles
       MINIO_MAX_FILE_SIZE: 5242880
-      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      ALLOWED_ORIGINS: '["http://localhost:3000", "http://localhost", "http://127.0.0.1:3000", "http://127.0.0.1"]'
     depends_on:
       postgres:
         condition: service_healthy
@@ -215,6 +222,56 @@ services:
     restart: on-failure
 
   # ---------------------------------------------------------------------------
+  # Community Service
+  #
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8004: retained for Phase 1 direct access while Traefik is
+  #   being validated.
+  # Next.js rewrite: /communities/api/:path* → http://community-service:8000/api/:path*
+  # ---------------------------------------------------------------------------
+  community-service:
+    build:
+      context: .
+      dockerfile: services/community-service/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/community_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
+
+  # ---------------------------------------------------------------------------
+  # Feed Service
+  #
+  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
+  # Host port 8005: retained for Phase 1 direct access while Traefik is
+  #   being validated.
+  # Next.js rewrite: /feed/api/:path* → http://feed-service:8000/api/:path*
+  # ---------------------------------------------------------------------------
+  feed-service:
+    build:
+      context: .
+      dockerfile: services/feed-service/Dockerfile
+    ports:
+      - "8005:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/feed_db
+      ENVIRONMENT: development
+      JWT_SECRET: default_secret_key_change_me_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
+
+  # ---------------------------------------------------------------------------
   # Frontend — Next.js web application
   # ---------------------------------------------------------------------------
   frontend:
@@ -230,6 +287,9 @@ services:
       - expedition-service
       - authentication-service
       - user-service
+      - community-service
+      - feed-service
+    restart: on-failure
 
 # ---------------------------------------------------------------------------
 # Named volumes

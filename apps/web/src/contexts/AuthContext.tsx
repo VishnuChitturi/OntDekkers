@@ -31,6 +31,7 @@ import React, {
   useState,
 } from "react";
 import { setAccessToken } from "@/services/api";
+import { setAuthToken } from "@/services/axios";
 import {
   getMe,
   login as authLogin,
@@ -63,18 +64,44 @@ interface LoginCredentials {
 const REFRESH_TOKEN_KEY = "ontdekker_refresh_token";
 
 function getStoredRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (
+    typeof window === "undefined" ||
+    typeof localStorage === "undefined" ||
+    typeof localStorage.getItem !== "function"
+  ) {
+    return null;
+  }
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function storeRefreshToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  if (
+    typeof window === "undefined" ||
+    typeof localStorage === "undefined" ||
+    typeof localStorage.setItem !== "function"
+  ) {
+    return;
+  }
+  try {
+    localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  } catch {}
 }
 
 function clearStoredRefreshToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  if (
+    typeof window === "undefined" ||
+    typeof localStorage === "undefined" ||
+    typeof localStorage.removeItem !== "function"
+  ) {
+    return;
+  }
+  try {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {}
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Set in-memory access token — never log it
       setAccessToken(tokenData.access_token);
+      setAuthToken(tokenData.access_token);
 
       // Load user identity from /auth/me (do not decode JWT client-side)
       const authUser = await getMe();
@@ -124,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Refresh token is invalid or expired — clear stale state silently
       clearStoredRefreshToken();
       setAccessToken(null);
+      setAuthToken(null);
       setUser(null);
     }
   }, []);
@@ -151,6 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Keep access token in memory only
       setAccessToken(tokenData.access_token);
+      setAuthToken(tokenData.access_token);
 
       // Fetch and store authenticated user identity
       const authUser = await getMe();
@@ -178,6 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Clear all local auth state regardless of remote call result
     clearStoredRefreshToken();
     setAccessToken(null);
+    setAuthToken(null);
     setUser(null);
   }, []);
 

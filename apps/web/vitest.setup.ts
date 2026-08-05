@@ -48,11 +48,12 @@ class LocalStorageMock implements Storage {
   }
 }
 
-// Inject localStorage into the jsdom window if it's missing
-if (typeof window !== "undefined" && !window.localStorage) {
+// Inject localStorage into the jsdom window if it's missing or broken (e.g. Node 22 uninitialized Storage)
+if (typeof window !== "undefined" && typeof window.localStorage?.getItem !== "function") {
   Object.defineProperty(window, "localStorage", {
     value: new LocalStorageMock(),
     writable: true,
+    configurable: true,
   });
 }
 

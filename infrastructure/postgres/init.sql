@@ -24,3 +24,9 @@ SELECT 'CREATE DATABASE auth_db'
 
 SELECT 'CREATE DATABASE user_db'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'user_db')\gexec
+
+SELECT 'CREATE DATABASE community_db'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'community_db')\gexec
+
+SELECT 'CREATE DATABASE feed_db'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'feed_db')\gexec

@@ -1,3 +1,4 @@
+import { AppLayout } from "@/components/navigation/AppLayout";
 import MyTripsView from "@/views/Trips/MyTripsView";
 
 export const metadata = {
@@ -6,5 +7,9 @@ export const metadata = {
 };
 
 export default function MyTripsPage() {
-  return <MyTripsView />;
+  return (
+    <AppLayout>
+      <MyTripsView />
+    </AppLayout>
+  );
 }

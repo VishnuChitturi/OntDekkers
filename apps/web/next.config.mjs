@@ -41,6 +41,16 @@ const nextConfig = {
         source: "/expeditions/api/:path*",
         destination: "http://expedition-service:8000/api/:path*",
       },
+      {
+        // Feed Service — internal Docker hostname
+        source: "/feed/api/:path*",
+        destination: "http://feed-service:8000/api/:path*",
+      },
+      {
+        // Community Service — internal Docker hostname
+        source: "/communities/api/:path*",
+        destination: "http://community-service:8000/api/:path*",
+      },
     ];
   },
 };

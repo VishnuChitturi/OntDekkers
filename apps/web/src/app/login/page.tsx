@@ -22,17 +22,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { AuthCard } from "@/components/auth/AuthCard";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError } from "@/services/api";
 
-/** Only allow redirects to same-origin relative paths. */
+/** Only allow redirects to same-origin relative paths, defaulting to /feed. */
 function getSafeRedirect(raw: string | null): string {
-  if (!raw) return "/";
+  if (!raw) return "/feed";
   const decoded = decodeURIComponent(raw);
-  // Must be a relative path starting with / and not //
-  if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
-  return "/";
+  // Must be a relative path starting with / and not // or /
+  if (
+    decoded.startsWith("/") &&
+    !decoded.startsWith("//") &&
+    decoded !== "/"
+  ) {
+    return decoded;
+  }
+  return "/feed";
 }
 
 function LoginForm() {
@@ -79,6 +84,15 @@ function LoginForm() {
       router.replace(redirectTo);
     } catch (err) {
       if (err instanceof ApiError) {
+        // Email not verified — send the user to the verification screen so
+        // they can enter their OTP. This is not a login failure; it is an
+        // expected state for newly registered accounts.
+        if (err.code === "EMAIL_NOT_VERIFIED") {
+          router.replace(
+            `/verify-email?email=${encodeURIComponent(email.trim())}`
+          );
+          return;
+        }
         setError(err.message);
       } else {
         setError("Something went wrong. Please try again.");
@@ -170,22 +184,30 @@ function LoginForm() {
         />
       </div>
 
-      {/* Submit */}
-      <Button
+      {/* Submit — uses a native <button type="submit"> so the form's onSubmit fires.
+           The @base-ui/react Button primitive hardcodes type="button" on native buttons
+           and cannot be overridden by the caller's type prop. */}
+      <button
         type="submit"
         disabled={submitting}
-        className="w-full"
-        size="lg"
+        className={[
+          "w-full inline-flex items-center justify-center gap-2",
+          "h-10 rounded-lg px-4 text-sm font-medium",
+          "bg-[#111111] text-white transition-colors",
+          "hover:bg-[#333333] focus-visible:outline focus-visible:outline-2",
+          "focus-visible:outline-offset-2 focus-visible:outline-[#111111]",
+          "disabled:pointer-events-none disabled:opacity-50",
+        ].join(" ")}
       >
         {submitting ? (
           <>
-            <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+            <Loader2 className="size-4 animate-spin" aria-hidden />
             Signing in…
           </>
         ) : (
           "Sign in"
         )}
-      </Button>
+      </button>
 
       {/* Register link */}
       <p className="text-center text-sm text-gray-500">

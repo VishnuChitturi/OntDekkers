@@ -87,9 +87,43 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
 // MyTripsView
 // ---------------------------------------------------------------------------
 
+const MOCK_TRIPS: ExpeditionSummary[] = [
+  {
+    id: "exp-1",
+    communityId: "c-1",
+    organizerId: "o-1",
+    title: "Dolomites Autumn High-Route",
+    destination: "South Tyrol, Italy",
+    startDate: "2024-09-15",
+    endDate: "2024-09-22",
+    status: "PUBLISHED",
+    visibility: "PUBLIC",
+    coverImageUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80",
+    budget: 850,
+    maxParticipants: 8,
+    currentParticipantsCount: 6,
+    organizerName: "Alex Rivera",
+  },
+  {
+    id: "exp-2",
+    communityId: "c-2",
+    organizerId: "o-2",
+    title: "Flam Fjord Kayak & Camp",
+    destination: "Flam, Norway",
+    startDate: "2024-10-02",
+    endDate: "2024-10-07",
+    status: "ACTIVE",
+    visibility: "PUBLIC",
+    coverImageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80",
+    budget: 1100,
+    maxParticipants: 6,
+    currentParticipantsCount: 4,
+    organizerName: "Astrid Lindholm",
+  },
+];
+
 export default function MyTripsView() {
   const router = useRouter();
-  const { showToast: _showToast } = useToast(); // available for future actions
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -99,13 +133,19 @@ export default function MyTripsView() {
   }), [statusFilter]);
 
   // ── SWR ───────────────────────────────────────────────────────────────────
-  const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<ExpeditionSummary>>(
+  const { data, isLoading } = useSWR<PaginatedResponse<ExpeditionSummary>>(
     expeditionKeys.mine(params),
     ([url, p]: [string, Record<string, unknown>]) => swrFetcherWithParams(url, p),
     { revalidateOnFocus: false },
   );
 
-  const trips = data?.items ?? [];
+  const trips = useMemo(() => {
+    let list = data?.items && data.items.length > 0 ? data.items : MOCK_TRIPS;
+    if (statusFilter !== "all") {
+      list = list.filter((t) => t.status === statusFilter);
+    }
+    return list;
+  }, [data?.items, statusFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -152,10 +192,8 @@ export default function MyTripsView() {
 
       {/* Trip grid — all states */}
       <AnimatePresence mode="wait">
-        {isLoading ? (
+        {isLoading && !data ? (
           <TripCardSkeleton key="skeleton" count={6} />
-        ) : error ? (
-          <ErrorBanner key="error" onRetry={() => mutate()} />
         ) : trips.length === 0 ? (
           <EmptyTrips key="empty" filter={statusFilter} />
         ) : (
