@@ -1,21 +1,24 @@
+version: '3.8'
+
+# =============================================================================
+# OntDekker — Local Development Docker Compose
+#
+# Services:
+#   - API Gateway: traefik
+#   - Infrastructure: postgres, redis, kafka, minio
+#   - Microservices: authentication-service, user-service, guide-service,
+#                    expedition-service, community-service, feed-service
+#   - Frontend: Next.js web app
+# =============================================================================
+
 services:
 
   # ---------------------------------------------------------------------------
-  # API Gateway
+  # API Gateway — Traefik v2.10
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:v2.10
-    # Static configuration is loaded from platform/gateway/traefik.yml.
-    # Dynamic routing rules (routers/services/middlewares) live in
-    # platform/gateway/dynamic.yml and are watched for hot-reload.
-    #
-    # File provider is used instead of Docker provider because Docker Desktop
-    # on macOS does not reliably expose a connectable Docker socket inside
-    # containers (bind-mounted socket cannot be opened from within the VM).
-    #
-    # Routing contract (team_guidelines.md — /api/v1/{service-name}/* standard):
-    #   http://localhost/api/v1/authentication/* → authentication-service:8000
-    #   http://localhost/api/v1/user/*           → user-service:8000
+    container_name: ontdekker-traefik
     volumes:
       - ./platform/gateway/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./platform/gateway/dynamic.yml:/etc/traefik/dynamic.yml:ro
@@ -26,22 +29,15 @@ services:
       - ontdekker-gateway
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL
-  #
-  # Both init scripts are mounted into docker-entrypoint-initdb.d/ and run
-  # in alphabetical order on a fresh volume:
-  #   00-init.sql             — creates auth_db, user_db  (Developer 1)
-  #   init-databases.sh       — creates guide_db, trip_db (Developer 3)
-  #
-  # The healthcheck uses pg_isready so downstream services only start after
-  # PostgreSQL is actually accepting connections — no sleep timers needed.
-  # Host port 5433 is used to avoid conflicts with any local PostgreSQL instance.
+  # PostgreSQL 16 — single container, per-service databases
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
+    container_name: ontdekker-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
     ports:
       - "5433:5432"
     volumes:
@@ -56,18 +52,20 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Redis
+  # Redis 7
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7
+    container_name: ontdekker-redis
     ports:
       - "6379:6379"
 
   # ---------------------------------------------------------------------------
-  # Kafka (KRaft mode — no ZooKeeper)
+  # Apache Kafka (KRaft mode — no ZooKeeper)
   # ---------------------------------------------------------------------------
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    container_name: ontdekker-kafka
     ports:
       - "9092:9092"
     environment:
@@ -87,37 +85,29 @@ services:
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
 
   # ---------------------------------------------------------------------------
-  # MinIO object storage
+  # MinIO — S3-compatible object storage
   # ---------------------------------------------------------------------------
   minio:
-    image: minio/minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    image: minio/minio:latest
+    container_name: ontdekker-minio
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-    # NOTE: The minio/minio image does not ship curl, wget, or mc.
-    # A reliable HTTP-based healthcheck is therefore not possible without
-    # adding an external tool to the image. The user-service relies on
-    # init_minio() in its lifespan startup, which is idempotent and will
-    # fail fast with a clear S3Error if MinIO is not yet ready.
+    ports:
+      - "9000:9000"
+      - "9001:9001"
 
   # ---------------------------------------------------------------------------
   # Authentication Service
-  #
-  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
-  # Host port 8000: retained for Phase 1 direct access while Traefik is
-  #   being validated.
-  # Gateway routing: http://localhost/api/v1/authentication/*
   # ---------------------------------------------------------------------------
   authentication-service:
     build:
       context: .
       dockerfile: services/authentication-service/Dockerfile
+    container_name: ontdekker-auth-service
     ports:
       - "8000:8000"
     networks:
@@ -148,16 +138,12 @@ services:
 
   # ---------------------------------------------------------------------------
   # User Service
-  #
-  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
-  # Host port 8001: retained for Phase 1 direct access while Traefik is
-  #   being validated.
-  # Gateway routing: http://localhost/api/v1/user/*
   # ---------------------------------------------------------------------------
   user-service:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
+    container_name: ontdekker-user-service
     ports:
       - "8001:8000"
     networks:
@@ -186,30 +172,13 @@ services:
       sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
 
   # ---------------------------------------------------------------------------
-  # Expedition Service
-  # ---------------------------------------------------------------------------
-  expedition-service:
-    build:
-      context: .
-      dockerfile: services/expedition-service/Dockerfile
-    ports:
-      - "8003:8000"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
-      ENVIRONMENT: development
-      JWT_SECRET: default_secret_key_change_me_in_production
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: on-failure
-
-  # ---------------------------------------------------------------------------
   # Guide Service
   # ---------------------------------------------------------------------------
   guide-service:
     build:
       context: .
       dockerfile: services/guide-service/Dockerfile
+    container_name: ontdekker-guide-service
     ports:
       - "8002:8000"
     environment:
@@ -222,51 +191,80 @@ services:
     restart: on-failure
 
   # ---------------------------------------------------------------------------
-  # Community Service
-  #
-  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
-  # Host port 8004: retained for Phase 1 direct access while Traefik is
-  #   being validated.
-  # Next.js rewrite: /communities/api/:path* → http://community-service:8000/api/:path*
+  # Expedition Service
   # ---------------------------------------------------------------------------
-  community-service:
+  expedition-service:
     build:
       context: .
-      dockerfile: services/community-service/Dockerfile
+      dockerfile: services/expedition-service/Dockerfile
+    container_name: ontdekker-expedition-service
     ports:
-      - "8004:8000"
+      - "8003:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/community_db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
       ENVIRONMENT: development
       JWT_SECRET: default_secret_key_change_me_in_production
     depends_on:
       postgres:
         condition: service_healthy
     restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Community Service
+  # ---------------------------------------------------------------------------
+  community-service:
+    build:
+      context: .
+      dockerfile: services/community-service/Dockerfile
+    container_name: ontdekker-community-service
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/community_db
+      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_ALGORITHM: HS256
+      SERVICE_NAME: community-service
+      ENVIRONMENT: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      KAFKA_URL: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: on-failure
     command: >
       sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
 
   # ---------------------------------------------------------------------------
   # Feed Service
-  #
-  # Internal port: 8000 (matches uvicorn CMD in Dockerfile)
-  # Host port 8005: retained for Phase 1 direct access while Traefik is
-  #   being validated.
-  # Next.js rewrite: /feed/api/:path* → http://feed-service:8000/api/:path*
   # ---------------------------------------------------------------------------
   feed-service:
     build:
       context: .
       dockerfile: services/feed-service/Dockerfile
+    container_name: ontdekker-feed-service
     ports:
       - "8005:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/feed_db
-      ENVIRONMENT: development
       JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_ALGORITHM: HS256
+      SERVICE_NAME: feed-service
+      ENVIRONMENT: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      KAFKA_URL: kafka:29092
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
     restart: on-failure
     command: >
       sh -c "alembic upgrade head && uvicorn app.core.main:app --host 0.0.0.0 --port 8000"
@@ -278,6 +276,7 @@ services:
     build:
       context: apps/web
       dockerfile: Dockerfile
+    container_name: ontdekker-frontend
     ports:
       - "3000:3000"
     environment:
@@ -291,19 +290,10 @@ services:
       - feed-service
     restart: on-failure
 
-# ---------------------------------------------------------------------------
-# Named volumes
-# ---------------------------------------------------------------------------
 volumes:
   postgres_data:
   minio_data:
 
-# ---------------------------------------------------------------------------
-# Networks
-# ---------------------------------------------------------------------------
-# ontdekker-gateway: shared overlay used by Traefik and the microservices it
-# routes. Services not exposed via Traefik do not need to join it.
-# ---------------------------------------------------------------------------
 networks:
   ontdekker-gateway:
     driver: bridge

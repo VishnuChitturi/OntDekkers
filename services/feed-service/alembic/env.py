@@ -4,29 +4,12 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.config.settings import settings
-from shared import Base
+from shared.database import Base
 
-# ---------------------------------------------------------------------------
-# CRITICAL: Import all ORM models so they register against Base.metadata
-# before target_metadata is assigned below.
-#
-# Without this import, Base.metadata contains zero tables and Alembic
-# autogenerate produces a completely empty migration.
-#
-# app/models/__init__.py imports every model module in dependency order,
-# so importing the package is sufficient to register all tables.
-# ---------------------------------------------------------------------------
-import app.models  # noqa: F401  — side-effect import, must not be removed
+# Import all models for Alembic autodiscovery
+import app.models  # noqa: F401
 
-# Alembic Config object
 config = context.config
-
-# NOTE: We do NOT call fileConfig() here. The project uses
-# shared.logging.setup_logging() for structured JSON logging.
-# The minimal alembic.ini does not contain the [loggers]/[handlers]/
-# [formatters] sections that fileConfig() requires, and Alembic
-# falls back to Python's default logging without it.
-
 target_metadata = Base.metadata
 
 

@@ -8,10 +8,21 @@ Design rules:
 - Soft-delete via SoftDeleteMixin.
 - member_count is a denormalized counter updated on membership changes.
 """
+
 import uuid
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import UUID, Boolean, Index, Integer, String, Text, UniqueConstraint
+
+from sqlalchemy import (
+    UUID,
+    Boolean,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from shared.database import AuditMixin, Base, SoftDeleteMixin
 from shared.constants.status import CommunityStatus, CommunityVisibility
 
@@ -26,6 +37,7 @@ class Community(AuditMixin, SoftDeleteMixin, Base):
     Core community entity.
     Represents a location-based social group for slow travelers.
     """
+
     __tablename__ = "communities"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -47,7 +59,7 @@ class Community(AuditMixin, SoftDeleteMixin, Base):
         String(20), nullable=False, default=CommunityStatus.ACTIVE, index=True
     )
     visibility: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=CommunityVisibility.PUBLIC
+        String(20), nullable=False, default=CommunityVisibility.PUBLIC, index=True
     )
     requires_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     member_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -85,4 +97,4 @@ class Community(AuditMixin, SoftDeleteMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Community id={self.id} name={self.name} slug={self.slug}>"
+        return f"<Community id={self.id} name={self.name!r} slug={self.slug!r}>"

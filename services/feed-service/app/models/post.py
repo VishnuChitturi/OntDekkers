@@ -9,10 +9,22 @@ Design rules:
 - Binary media is never stored here. post_media stores MinIO object URLs only.
 - Soft-delete via SoftDeleteMixin (is_deleted, deleted_at, deleted_by).
 """
+
 import uuid
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import UUID, Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+
+from sqlalchemy import (
+    UUID,
+    Boolean,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from shared.database import AuditMixin, Base, SoftDeleteMixin
 from shared.constants.status import MediaType, PostStatus, PostVisibility
 
@@ -25,27 +37,52 @@ class Post(AuditMixin, SoftDeleteMixin, Base):
     Core travel post entity.
     Represents a user's travel story shared on the platform.
     """
+
     __tablename__ = "posts"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
-    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    community_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    expedition_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
 
-    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
+
+    community_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+
+    expedition_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=PostStatus.PUBLISHED, index=True
+        String(20),
+        nullable=False,
+        default=PostStatus.PUBLISHED,
+        index=True,
     )
     visibility: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=PostVisibility.PUBLIC, index=True
+        String(20),
+        nullable=False,
+        default=PostVisibility.PUBLIC,
+        index=True,
     )
 
-    # Relationships
     media: Mapped[list["PostMedia"]] = relationship(
         "PostMedia",
         back_populates="post",
@@ -73,20 +110,25 @@ class Post(AuditMixin, SoftDeleteMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Post id={self.id} title={self.title} author={self.author_id}>"
+        return f"<Post id={self.id} title={self.title!r} author={self.author_id}>"
 
 
-class PostMedia(Base):
+class PostMedia(AuditMixin, Base):
     """
     Media metadata for a post.
     Binary files are stored in MinIO (bucket: posts).
     Only the MinIO object URL is persisted here.
     """
+
     __tablename__ = "post_media"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
+
     post_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("posts.id", ondelete="CASCADE"),
@@ -96,11 +138,16 @@ class PostMedia(Base):
 
     media_url: Mapped[str] = mapped_column(String(1024), nullable=False)
     object_key: Mapped[str] = mapped_column(String(1024), nullable=False)
-    media_type: Mapped[str] = mapped_column(String(20), nullable=False, default=MediaType.IMAGE)
+
+    media_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=MediaType.IMAGE,
+    )
+
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     alt_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    # Relationships
     post: Mapped["Post"] = relationship("Post", back_populates="media")
 
     __table_args__ = (
@@ -116,20 +163,25 @@ class PostTag(Base):
     Travel tags attached to a post.
     Examples: 'Hiking', 'Camping', 'Wildlife', 'Culture', 'Photography'.
     """
+
     __tablename__ = "post_tags"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
+
     post_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("posts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+
     tag: Mapped[str] = mapped_column(String(50), nullable=False)
 
-    # Relationships
     post: Mapped["Post"] = relationship("Post", back_populates="tags")
 
     __table_args__ = (
@@ -138,4 +190,4 @@ class PostTag(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<PostTag post_id={self.post_id} tag={self.tag}>"
+        return f"<PostTag post_id={self.post_id} tag={self.tag!r}>"

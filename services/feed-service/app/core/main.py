@@ -6,6 +6,7 @@ from typing import Dict, Any
 from app.config.settings import settings
 from app.database.engine import engine
 from app.database.session import async_session
+from app.api import api_router
 from shared import register_exception_handlers, setup_logging
 from shared.dependencies import get_request_id, get_db
 
@@ -27,6 +28,9 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+
+# Include API routes
+app.include_router(api_router)
 
 @app.get("/health", response_model=Dict[str, Any])
 async def health_check(db=Depends(get_db)):

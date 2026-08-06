@@ -13,8 +13,8 @@ from shared.utils.security import decode_jwt_token
 from shared.logging import request_id_ctx, correlation_id_ctx
 from shared.config import get_common_settings
 
+
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
-    # Microservices attach their async sessionmaker to request.app.state.db_sessionmaker
     sessionmaker = getattr(request.app.state, "db_sessionmaker", None)
     if sessionmaker is None:
         raise RuntimeError("Database sessionmaker is not configured on app state.")
@@ -24,33 +24,30 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
             yield session
             await session.commit()
         except OntDekkerException:
-            # OntDekkerException subclasses (UnauthorizedException, NotFoundException,
-            # ConflictException, etc.) are intentional HTTP error responses, not DB
-            # errors. The DB writes made before the exception (e.g. increment_attempts
-            # on a failed OTP check) must be committed so they are not lost.
             await session.commit()
             raise
         except Exception:
             await session.rollback()
             raise
 
+
 async def get_request_id(
     x_request_id: Optional[str] = Header(None),
-    x_correlation_id: Optional[str] = Header(None)
+    x_correlation_id: Optional[str] = Header(None),
 ) -> None:
     req_id = x_request_id or str(uuid.uuid4())
     corr_id = x_correlation_id or req_id
-    
-    # Store in context variables for logging
+
     request_id_ctx.set(req_id)
     correlation_id_ctx.set(corr_id)
+
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
     if not authorization or not authorization.startswith("Bearer "):
         raise UnauthorizedException("Missing or invalid authorization header.")
-        
+
     token = authorization.split(" ")[1]
     settings = get_common_settings()
     try:
@@ -64,19 +61,9 @@ async def get_optional_current_user(
     authorization: Optional[str] = Header(None),
 ) -> Optional[Dict[str, Any]]:
     """
-    Optional JWT authentication dependency.
-
-    Returns the validated JWT payload when a valid Bearer token is present.
-    Returns None when:
-      - No Authorization header is provided (unauthenticated public request)
-      - The Authorization header is present but the token is invalid/expired
-        (silently degrades — the endpoint remains accessible)
-
-    Use this for endpoints that are publicly accessible but provide additional
-    viewer-specific context when the caller is authenticated (e.g. is_following,
-    is_own_profile on a public profile response).
-
-    Never raises — unauthenticated callers always receive None.
+    Returns the JWT payload if a valid Bearer token is present, None otherwise.
+    Does NOT raise — safe to use on endpoints that work for both authenticated
+    and anonymous users.
     """
     if not authorization or not authorization.startswith("Bearer "):
         return None
@@ -87,8 +74,12 @@ async def get_optional_current_user(
         payload = decode_jwt_token(token, settings.JWT_SECRET, settings.JWT_ALGORITHM)
         return payload
     except JWTError:
-        # Invalid or expired token on a public endpoint — degrade gracefully
         return None
+
+
+# Alias for backward compatibility across services
+optional_current_user = get_optional_current_user
+
 
 def require_role(required_role: str):
     async def role_checker(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -96,4 +87,5 @@ def require_role(required_role: str):
         if required_role not in user_roles:
             raise ForbiddenException("Insufficient permissions to access this resource.")
         return current_user
+
     return role_checker

@@ -4,11 +4,12 @@
  * OntDekker FeedView — Travel Social Media Feed
  *
  * Full-featured modern travel feed featuring:
+ *   - Feed Toggle (All Stories vs Communities) with animated transitions
+ *   - Live search across title, content, location, tags, author, and community
  *   - Create Post Composer with media, tags, and community assignment
- *   - Post Timeline with author avatars, community badges, images, tags,
- *     like toggles, comment previews, sharing, and bookmarking
- *   - Right Sidebar Column: Trending Communities, Suggested Travelers, Upcoming Expeditions
- *   - Fallback mock data ensuring the feed is vibrant and demonstrable
+ *   - Timeline cards with like, bookmark, comment, and share interactions
+ *   - Right Sidebar: Trending Communities (Join/Joined), Suggested Travelers (Follow/Following),
+ *     Upcoming Expeditions (Clickable -> /expeditions/[id])
  */
 
 import React, { useState, useMemo } from "react";
@@ -22,16 +23,18 @@ import {
   MessageSquare,
   Share2,
   Bookmark,
-  Image as ImageIcon,
   Send,
-  PlusCircle,
   Sparkles,
   Calendar,
   CheckCircle2,
+  UserPlus,
+  UserCheck,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import Search from "@/components/navigation/Search";
 import { swrFetcherWithParams, feedKeys } from "@/services/cache";
+import { joinCommunity } from "@/services/communityApi";
 import { useToast } from "@/hooks/useToast";
 import { useAuth } from "@/contexts/AuthContext";
 import type { PostSummary, PaginatedResponse } from "@/types";
@@ -106,12 +109,12 @@ const INITIAL_MOCK_POSTS: ExtendedPost[] = [
     authorName: "Amara Diallo",
     authorHandle: "amara_treks",
     authorAvatar: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=150&q=80",
-    communityName: "Desert & Oasis Society",
-    title: "Camping under the Sahara starlight",
-    content: "No cell service for three days in Erg Chebbi. Cooking tagine over open coals with our Berber guide Brahim. This is what true expedition culture is all about.",
+    communityName: null, // Public story
+    title: "Solo Backpacking across Iceland's Ring Road",
+    content: "Day 4 on the south coast. The solitude here is therapeutic. Stopped by a geothermal hot stream near Vik while glaciers glinted in the distance.",
     imageUrl: "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?auto=format&fit=crop&w=1200&q=80",
-    location: "Erg Chebbi, Morocco",
-    tags: ["SaharaExpedition", "Stargazing", "CulturalImmersion"],
+    location: "Vik, Iceland",
+    tags: ["SoloTravel", "Iceland", "RingRoad"],
     likeCount: 89,
     commentCount: 15,
     isLiked: false,
@@ -122,19 +125,19 @@ const INITIAL_MOCK_POSTS: ExtendedPost[] = [
 ];
 
 const TRENDING_COMMUNITIES = [
-  { id: "1", name: "Alpine Explorers", members: 1420, category: "Mountain Treks", icon: "🏔️" },
-  { id: "2", name: "Nordic Trail Seekers", members: 980, category: "Slow Travel", icon: "🌲" },
-  { id: "3", name: "Mediterranean Coast", members: 2150, category: "Coastal & Sailing", icon: "🌊" },
+  { id: "comm-1", name: "Alpine Explorers", members: 1420, category: "Mountain Treks", icon: "🏔️" },
+  { id: "comm-2", name: "Nordic Trail Seekers", members: 980, category: "Slow Travel", icon: "🌲" },
+  { id: "comm-3", name: "Mediterranean Coast", members: 2150, category: "Coastal & Sailing", icon: "🌊" },
 ];
 
 const SUGGESTED_TRAVELERS = [
-  { name: "Sofia Chen", handle: "@sofia_trails", location: "Oslo, Norway", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80", isGuide: true },
-  { name: "Lukas Weber", handle: "@lukas_alps", location: "Innsbruck, Austria", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=80", isGuide: true },
+  { id: "t-1", name: "Sofia Chen", handle: "sofia_trails", location: "Oslo, Norway", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80", isGuide: true },
+  { id: "t-2", name: "Lukas Weber", handle: "lukas_alps", location: "Innsbruck, Austria", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=80", isGuide: true },
 ];
 
 const UPCOMING_EXPEDITIONS = [
-  { title: "Dolomites Autumn Ridge Trek", date: "Sep 15 - 20", location: "South Tyrol, Italy", spotsLeft: 3 },
-  { title: "Fjord Kayaking & Camping", date: "Oct 02 - 07", location: "Flam, Norway", spotsLeft: 2 },
+  { id: "exp-1", title: "Dolomites Autumn Ridge Trek", date: "Sep 15 - 20", location: "South Tyrol, Italy", spotsLeft: 3 },
+  { id: "exp-2", title: "Fjord Kayaking & Camping", date: "Oct 02 - 07", location: "Flam, Norway", spotsLeft: 2 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -144,13 +147,18 @@ const UPCOMING_EXPEDITIONS = [
 export default function FeedView() {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const router = useRouter();
 
   // Search & Tab state
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "community" | "public">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "community">("all");
 
-  // Local post feed state (initialised with mock posts)
+  // Local post feed state
   const [posts, setPosts] = useState<ExtendedPost[]>(INITIAL_MOCK_POSTS);
+
+  // Interactive sidebar state
+  const [followedTravelers, setFollowedTravelers] = useState<Set<string>>(new Set());
+  const [joinedCommunities, setJoinedCommunities] = useState<Set<string>>(new Set(["comm-1"]));
 
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
@@ -198,11 +206,12 @@ export default function FeedView() {
       });
     }
 
-    // Apply Filter & Search
+    // Apply Segmented Control Filter ("All Stories" vs "Communities")
     if (activeFilter === "community") {
       combined = combined.filter((p) => p.communityName !== null);
     }
 
+    // Live Search Filter (title, tags, location, author, community name)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       combined = combined.filter(
@@ -210,6 +219,9 @@ export default function FeedView() {
           p.title.toLowerCase().includes(q) ||
           p.content.toLowerCase().includes(q) ||
           p.location.toLowerCase().includes(q) ||
+          p.authorName.toLowerCase().includes(q) ||
+          p.authorHandle.toLowerCase().includes(q) ||
+          (p.communityName?.toLowerCase().includes(q) ?? false) ||
           p.tags.some((t) => t.toLowerCase().includes(q))
       );
     }
@@ -230,7 +242,7 @@ export default function FeedView() {
       authorName: user?.email.split("@")[0] ?? "You",
       authorHandle: user?.email.split("@")[0] ?? "you",
       authorAvatar: null,
-      communityName: selectedCommunity || null,
+      communityName: selectedCommunity === "Public Feed (No Community)" ? null : selectedCommunity,
       title: newTitle.trim() || "Travel Note",
       content: newContent.trim(),
       imageUrl: newImageUrl.trim() || null,
@@ -250,7 +262,7 @@ export default function FeedView() {
     setNewLocation("");
     setNewImageUrl("");
     setComposerOpen(false);
-    showToast("Story published to community feed!", "success");
+    showToast("Story published to feed!", "success");
   }
 
   // Toggle Like
@@ -288,10 +300,52 @@ export default function FeedView() {
   }
 
   // Share action
-  function handleShare(post: ExtendedPost) {
+  function handleShare(_post: ExtendedPost) {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(window.location.href);
       showToast("Story link copied to clipboard!", "success");
+    }
+  }
+
+  // Follow traveler toggle
+  function handleToggleFollow(traveler: typeof SUGGESTED_TRAVELERS[0]) {
+    setFollowedTravelers((prev) => {
+      const next = new Set(prev);
+      if (next.has(traveler.handle)) {
+        next.delete(traveler.handle);
+        showToast(`Unfollowed ${traveler.name}`, "info");
+      } else {
+        next.add(traveler.handle);
+        showToast(`Now following ${traveler.name}!`, "success");
+      }
+      return next;
+    });
+  }
+
+  // Join community toggle
+  async function handleToggleJoin(community: typeof TRENDING_COMMUNITIES[0]) {
+    const isJoined = joinedCommunities.has(community.id);
+    
+    // Optimistic UI update
+    setJoinedCommunities((prev) => {
+      const next = new Set(prev);
+      if (isJoined) {
+        next.delete(community.id);
+      } else {
+        next.add(community.id);
+      }
+      return next;
+    });
+
+    if (isJoined) {
+      showToast(`Left ${community.name}`, "info");
+    } else {
+      showToast(`Joined ${community.name}!`, "success");
+      try {
+        await joinCommunity(community.id, {});
+      } catch {
+        // Fallback state retained
+      }
     }
   }
 
@@ -339,14 +393,14 @@ export default function FeedView() {
           </p>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills / Segmented Control */}
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setActiveFilter("all")}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               activeFilter === "all"
-                ? "bg-[#111111] text-white"
+                ? "bg-[#111111] text-white shadow-xs"
                 : "bg-white text-gray-600 border border-[#EAE7DF] hover:bg-gray-50"
             }`}
           >
@@ -357,7 +411,7 @@ export default function FeedView() {
             onClick={() => setActiveFilter("community")}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               activeFilter === "community"
-                ? "bg-[#111111] text-white"
+                ? "bg-[#111111] text-white shadow-xs"
                 : "bg-white text-gray-600 border border-[#EAE7DF] hover:bg-gray-50"
             }`}
           >
@@ -369,7 +423,7 @@ export default function FeedView() {
       {/* ── Search Bar ─────────────────────────────────────────────────── */}
       <div className="w-full max-w-xl">
         <Search
-          placeholder="Search stories, locations, or tags…"
+          placeholder="Search stories, locations, tags, or travelers…"
           value={searchQuery}
           onChange={setSearchQuery}
           ariaLabel="Search feed"
@@ -440,7 +494,7 @@ export default function FeedView() {
                     <option value="Alpine Explorers">Alpine Explorers</option>
                     <option value="Nordic Trail Seekers">Nordic Trail Seekers</option>
                     <option value="Desert & Oasis Society">Desert & Oasis Society</option>
-                    <option value="Public Feed">Public Feed (No Community)</option>
+                    <option value="Public Feed (No Community)">Public Feed (No Community)</option>
                   </select>
 
                   <div className="flex items-center gap-2">
@@ -464,192 +518,212 @@ export default function FeedView() {
             )}
           </div>
 
-          {/* ── Timeline Post Cards ──────────────────────────────────────── */}
+          {/* ── Timeline Post Cards with Motion Transition ───────────────── */}
           <div className="space-y-6">
-            {displayPosts.map((post) => (
-              <motion.article
-                key={post.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-2xl border border-[#EAE7DF] bg-white p-6 space-y-4 shadow-2xs hover:border-gray-300 transition-all"
-              >
-                {/* Author Header */}
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    {post.authorAvatar ? (
-                      <img
-                        src={post.authorAvatar}
-                        alt={post.authorName}
-                        className="size-10 rounded-full object-cover border border-[#EAE7DF]"
-                      />
-                    ) : (
-                      <div className="size-10 rounded-full bg-[#111111] text-white flex items-center justify-center font-bold text-sm">
-                        {post.authorName.charAt(0).toUpperCase()}
+            <AnimatePresence mode="popLayout">
+              {displayPosts.length === 0 ? (
+                <motion.div
+                  key="empty-feed"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="rounded-2xl border border-[#EAE7DF] bg-white p-12 text-center space-y-3"
+                >
+                  <Compass size={36} className="mx-auto text-gray-300" />
+                  <p className="text-sm font-semibold text-[#111111]">No stories match your filter.</p>
+                  <p className="text-xs text-gray-500">Try adjusting your search query or switching to "All Stories".</p>
+                </motion.div>
+              ) : (
+                displayPosts.map((post) => (
+                  <motion.article
+                    key={post.id}
+                    layout
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    transition={{ duration: 0.25, ease: [0, 0, 0.2, 1] }}
+                    className="rounded-2xl border border-[#EAE7DF] bg-white p-6 space-y-4 shadow-2xs hover:border-gray-300 transition-all"
+                  >
+                    {/* Author Header */}
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        {post.authorAvatar ? (
+                          <img
+                            src={post.authorAvatar}
+                            alt={post.authorName}
+                            className="size-10 rounded-full object-cover border border-[#EAE7DF]"
+                          />
+                        ) : (
+                          <div className="size-10 rounded-full bg-[#111111] text-white flex items-center justify-center font-bold text-sm">
+                            {post.authorName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-sm font-bold text-[#111111]">
+                              {post.authorName}
+                            </h2>
+                            <span className="text-xs text-gray-400">
+                              @{post.authorHandle}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                            <span className="flex items-center gap-1 text-gray-400">
+                              <MapPin size={12} />
+                              {post.location}
+                            </span>
+                            <span>•</span>
+                            <span>{post.createdAt}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Community Badge */}
+                      {post.communityName && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#EAE7DF] bg-[#FBF9F4] px-3 py-1 text-[11px] font-semibold text-[#111111]">
+                          <Users size={12} />
+                          {post.communityName}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Content Body */}
+                    <div className="space-y-2">
+                      <h3 className="text-base font-bold text-[#111111] leading-snug">
+                        {post.title}
+                      </h3>
+                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                        {post.content}
+                      </p>
+                    </div>
+
+                    {/* Cover Image */}
+                    {post.imageUrl && (
+                      <div className="relative overflow-hidden rounded-xl bg-gray-100 max-h-96">
+                        <img
+                          src={post.imageUrl}
+                          alt={post.title}
+                          className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.01]"
+                        />
                       </div>
                     )}
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-sm font-bold text-[#111111]">
-                          {post.authorName}
-                        </h2>
-                        <span className="text-xs text-gray-400">
-                          @{post.authorHandle}
-                        </span>
+
+                    {/* Tags */}
+                    {post.tags && post.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {post.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            onClick={() => setSearchQuery(tag)}
+                            className="text-xs font-medium text-gray-500 hover:text-[#111111] cursor-pointer"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                        <span className="flex items-center gap-1 text-gray-400">
-                          <MapPin size={12} />
-                          {post.location}
-                        </span>
-                        <span>•</span>
-                        <span>{post.createdAt}</span>
+                    )}
+
+                    {/* Action Bar */}
+                    <div className="flex items-center justify-between border-t border-[#EAE7DF] pt-4 text-xs font-medium text-gray-600">
+                      <div className="flex items-center gap-6">
+                        {/* Like */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLike(post.id)}
+                          className={`flex items-center gap-1.5 transition-colors ${
+                            post.isLiked
+                              ? "text-red-600 font-semibold"
+                              : "hover:text-[#111111]"
+                          }`}
+                        >
+                          <Heart
+                            size={18}
+                            className={post.isLiked ? "fill-red-600 text-red-600" : ""}
+                          />
+                          <span>{post.likeCount}</span>
+                        </button>
+
+                        {/* Comment */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenComments((prev) => ({
+                              ...prev,
+                              [post.id]: !prev[post.id],
+                            }))
+                          }
+                          className="flex items-center gap-1.5 hover:text-[#111111] transition-colors"
+                        >
+                          <MessageSquare size={18} />
+                          <span>{post.commentCount}</span>
+                        </button>
+
+                        {/* Share */}
+                        <button
+                          type="button"
+                          onClick={() => handleShare(post)}
+                          className="flex items-center gap-1.5 hover:text-[#111111] transition-colors"
+                        >
+                          <Share2 size={18} />
+                          <span>Share</span>
+                        </button>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* Community Badge */}
-                  {post.communityName && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[#EAE7DF] bg-[#FBF9F4] px-3 py-1 text-[11px] font-semibold text-[#111111]">
-                      <Users size={12} />
-                      {post.communityName}
-                    </span>
-                  )}
-                </div>
-
-                {/* Content Body */}
-                <div className="space-y-2">
-                  <h3 className="text-base font-bold text-[#111111] leading-snug">
-                    {post.title}
-                  </h3>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
-                    {post.content}
-                  </p>
-                </div>
-
-                {/* Cover Image */}
-                {post.imageUrl && (
-                  <div className="relative overflow-hidden rounded-xl bg-gray-100 max-h-96">
-                    <img
-                      src={post.imageUrl}
-                      alt={post.title}
-                      className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.01]"
-                    />
-                  </div>
-                )}
-
-                {/* Tags */}
-                {post.tags && post.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {post.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-xs font-medium text-gray-500 hover:text-[#111111] cursor-pointer"
-                      >
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Action Bar */}
-                <div className="flex items-center justify-between border-t border-[#EAE7DF] pt-4 text-xs font-medium text-gray-600">
-                  <div className="flex items-center gap-6">
-                    {/* Like */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleLike(post.id)}
-                      className={`flex items-center gap-1.5 transition-colors ${
-                        post.isLiked
-                          ? "text-red-600 font-semibold"
-                          : "hover:text-[#111111]"
-                      }`}
-                    >
-                      <Heart
-                        size={18}
-                        className={post.isLiked ? "fill-red-600 text-red-600" : ""}
-                      />
-                      <span>{post.likeCount}</span>
-                    </button>
-
-                    {/* Comment */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOpenComments((prev) => ({
-                          ...prev,
-                          [post.id]: !prev[post.id],
-                        }))
-                      }
-                      className="flex items-center gap-1.5 hover:text-[#111111] transition-colors"
-                    >
-                      <MessageSquare size={18} />
-                      <span>{post.commentCount}</span>
-                    </button>
-
-                    {/* Share */}
-                    <button
-                      type="button"
-                      onClick={() => handleShare(post)}
-                      className="flex items-center gap-1.5 hover:text-[#111111] transition-colors"
-                    >
-                      <Share2 size={18} />
-                      <span>Share</span>
-                    </button>
-                  </div>
-
-                  {/* Bookmark */}
-                  <button
-                    type="button"
-                    onClick={() => handleToggleBookmark(post.id)}
-                    className={`flex items-center gap-1 transition-colors ${
-                      post.isBookmarked ? "text-[#111111]" : "hover:text-[#111111]"
-                    }`}
-                  >
-                    <Bookmark
-                      size={18}
-                      className={post.isBookmarked ? "fill-[#111111]" : ""}
-                    />
-                  </button>
-                </div>
-
-                {/* Expanded Comment Thread */}
-                {openComments[post.id] && (
-                  <div className="space-y-3 border-t border-[#EAE7DF] pt-3 mt-2">
-                    {post.comments.map((c) => (
-                      <div key={c.id} className="bg-[#FBF9F4] rounded-xl p-3 text-xs space-y-1">
-                        <div className="flex items-center justify-between font-semibold text-[#111111]">
-                          <span>{c.author}</span>
-                          <span className="text-[10px] text-gray-400 font-normal">{c.time}</span>
-                        </div>
-                        <p className="text-gray-700">{c.text}</p>
-                      </div>
-                    ))}
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="text"
-                        placeholder="Write a comment..."
-                        value={commentInput[post.id] ?? ""}
-                        onChange={(e) =>
-                          setCommentInput({ ...commentInput, [post.id]: e.target.value })
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleAddComment(post.id);
-                        }}
-                        className="flex-1 rounded-xl border border-[#EAE7DF] bg-white px-3 py-1.5 text-xs text-[#111111] outline-none focus:border-[#111111]"
-                      />
+                      {/* Bookmark */}
                       <button
                         type="button"
-                        onClick={() => handleAddComment(post.id)}
-                        className="rounded-xl bg-[#111111] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#333333]"
+                        onClick={() => handleToggleBookmark(post.id)}
+                        className={`flex items-center gap-1 transition-colors ${
+                          post.isBookmarked ? "text-[#111111]" : "hover:text-[#111111]"
+                        }`}
                       >
-                        Reply
+                        <Bookmark
+                          size={18}
+                          className={post.isBookmarked ? "fill-[#111111]" : ""}
+                        />
                       </button>
                     </div>
-                  </div>
-                )}
-              </motion.article>
-            ))}
+
+                    {/* Expanded Comment Thread */}
+                    {openComments[post.id] && (
+                      <div className="space-y-3 border-t border-[#EAE7DF] pt-3 mt-2">
+                        {post.comments.map((c) => (
+                          <div key={c.id} className="bg-[#FBF9F4] rounded-xl p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between font-semibold text-[#111111]">
+                              <span>{c.author}</span>
+                              <span className="text-[10px] text-gray-400 font-normal">{c.time}</span>
+                            </div>
+                            <p className="text-gray-700">{c.text}</p>
+                          </div>
+                        ))}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            placeholder="Write a comment..."
+                            value={commentInput[post.id] ?? ""}
+                            onChange={(e) =>
+                              setCommentInput({ ...commentInput, [post.id]: e.target.value })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleAddComment(post.id);
+                            }}
+                            className="flex-1 rounded-xl border border-[#EAE7DF] bg-white px-3 py-1.5 text-xs text-[#111111] outline-none focus:border-[#111111]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddComment(post.id)}
+                            className="rounded-xl bg-[#111111] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#333333]"
+                          >
+                            Reply
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </motion.article>
+                ))
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
@@ -665,29 +739,40 @@ export default function FeedView() {
             </div>
 
             <div className="space-y-3">
-              {TRENDING_COMMUNITIES.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#FBF9F4] transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl">{c.icon}</span>
-                    <div>
-                      <h4 className="text-xs font-bold text-[#111111]">{c.name}</h4>
-                      <p className="text-[11px] text-gray-500">
-                        {c.members.toLocaleString()} members
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => showToast(`Joined ${c.name}!`, "success")}
-                    className="rounded-lg border border-[#EAE7DF] bg-white px-3 py-1 text-xs font-semibold text-[#111111] hover:bg-gray-100"
+              {TRENDING_COMMUNITIES.map((c) => {
+                const isJoined = joinedCommunities.has(c.id);
+                return (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#FBF9F4] transition-colors cursor-pointer"
+                    onClick={() => router.push(`/communities/${c.id}`)}
                   >
-                    Join
-                  </button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">{c.icon}</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-[#111111]">{c.name}</h4>
+                        <p className="text-[11px] text-gray-500">
+                          {(c.members + (isJoined ? 1 : 0)).toLocaleString()} members
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleJoin(c);
+                      }}
+                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
+                        isJoined
+                          ? "bg-gray-100 text-gray-600 border border-gray-200"
+                          : "border border-[#EAE7DF] bg-white text-[#111111] hover:bg-gray-100"
+                      }`}
+                    >
+                      {isJoined ? "Joined" : "Join"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -699,36 +784,57 @@ export default function FeedView() {
             </h3>
 
             <div className="space-y-3">
-              {SUGGESTED_TRAVELERS.map((t) => (
-                <div
-                  key={t.handle}
-                  className="flex items-center justify-between p-2 rounded-xl hover:bg-[#FBF9F4] transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={t.avatar}
-                      alt={t.name}
-                      className="size-9 rounded-full object-cover border border-[#EAE7DF]"
-                    />
-                    <div>
-                      <div className="flex items-center gap-1">
-                        <h4 className="text-xs font-bold text-[#111111]">{t.name}</h4>
-                        {t.isGuide && (
-                          <CheckCircle2 size={12} className="text-blue-600 fill-blue-100" />
-                        )}
-                      </div>
-                      <p className="text-[10px] text-gray-400">{t.location}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => showToast(`Following ${t.name}!`, "info")}
-                    className="rounded-lg bg-[#111111] px-3 py-1 text-xs font-semibold text-white hover:bg-[#333333]"
+              {SUGGESTED_TRAVELERS.map((t) => {
+                const isFollowing = followedTravelers.has(t.handle);
+                return (
+                  <div
+                    key={t.handle}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-[#FBF9F4] transition-colors cursor-pointer"
+                    onClick={() => router.push(`/users/${t.handle}`)}
                   >
-                    Follow
-                  </button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={t.avatar}
+                        alt={t.name}
+                        className="size-9 rounded-full object-cover border border-[#EAE7DF]"
+                      />
+                      <div>
+                        <div className="flex items-center gap-1">
+                          <h4 className="text-xs font-bold text-[#111111]">{t.name}</h4>
+                          {t.isGuide && (
+                            <CheckCircle2 size={12} className="text-blue-600 fill-blue-100" />
+                          )}
+                        </div>
+                        <p className="text-[10px] text-gray-400">{t.location}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleFollow(t);
+                      }}
+                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
+                        isFollowing
+                          ? "bg-gray-100 text-gray-700 border border-gray-200"
+                          : "bg-[#111111] text-white hover:bg-[#333333]"
+                      }`}
+                    >
+                      {isFollowing ? (
+                        <>
+                          <UserCheck size={12} />
+                          Following
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus size={12} />
+                          Follow
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -742,10 +848,11 @@ export default function FeedView() {
             <div className="space-y-3">
               {UPCOMING_EXPEDITIONS.map((exp) => (
                 <div
-                  key={exp.title}
-                  className="p-3 rounded-xl border border-[#EAE7DF] bg-[#FBF9F4] space-y-1.5"
+                  key={exp.id}
+                  onClick={() => router.push(`/expeditions/${exp.id}`)}
+                  className="p-3 rounded-xl border border-[#EAE7DF] bg-[#FBF9F4] space-y-1.5 cursor-pointer hover:border-gray-400 hover:bg-white transition-all shadow-2xs"
                 >
-                  <h4 className="text-xs font-bold text-[#111111]">{exp.title}</h4>
+                  <h4 className="text-xs font-bold text-[#111111] hover:underline">{exp.title}</h4>
                   <div className="flex items-center justify-between text-[11px] text-gray-500">
                     <span className="flex items-center gap-1">
                       <Calendar size={12} />

@@ -1,6 +1,10 @@
 from enum import Enum
 
 
+# ---------------------------------------------------------------------------
+# Story / Post Status
+# ---------------------------------------------------------------------------
+
 class StoryStatus(str, Enum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
@@ -15,16 +19,28 @@ class PostStatus(str, Enum):
     DELETED = "DELETED"
 
 
-class PostVisibility(str, Enum):
-    PUBLIC = "PUBLIC"
-    COMMUNITY = "COMMUNITY"
-    PRIVATE = "PRIVATE"
+# ---------------------------------------------------------------------------
+# Post / Story Visibility
+# ---------------------------------------------------------------------------
 
+class PostVisibility(str, Enum):
+    PUBLIC = "PUBLIC"          # Visible to everyone
+    COMMUNITY = "COMMUNITY"    # Visible only to community members
+    PRIVATE = "PRIVATE"        # Visible only to the author
+
+
+# ---------------------------------------------------------------------------
+# Media
+# ---------------------------------------------------------------------------
 
 class MediaType(str, Enum):
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
 
+
+# ---------------------------------------------------------------------------
+# Community Status & Visibility
+# ---------------------------------------------------------------------------
 
 class CommunityStatus(str, Enum):
     ACTIVE = "ACTIVE"
@@ -36,6 +52,10 @@ class CommunityVisibility(str, Enum):
     PUBLIC = "PUBLIC"
     PRIVATE = "PRIVATE"
 
+
+# ---------------------------------------------------------------------------
+# Community Member Roles & Status
+# ---------------------------------------------------------------------------
 
 class MemberRole(str, Enum):
     OWNER = "OWNER"
@@ -57,6 +77,10 @@ class JoinRequestStatus(str, Enum):
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
 
+
+# ---------------------------------------------------------------------------
+# Expedition & Guide Status
+# ---------------------------------------------------------------------------
 
 class ExpeditionStatus(str, Enum):
     PENDING = "PENDING"

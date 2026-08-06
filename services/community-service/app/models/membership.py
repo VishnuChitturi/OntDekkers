@@ -9,10 +9,20 @@ Design rules:
 - Banned members have role=BANNED and status=BANNED.
 - Join requests are created for private communities or communities requiring approval.
 """
+
 import uuid
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import UUID, ForeignKey, Index, String, Text, UniqueConstraint
+
+from sqlalchemy import (
+    UUID,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from shared.database import Base, TimestampMixin, AuditMixin
 from shared.constants.status import MemberRole, MembershipStatus, JoinRequestStatus
 
@@ -26,27 +36,43 @@ class CommunityMember(AuditMixin, Base):
     A user can be a member of a given community exactly once.
     Role determines permissions within the community.
     """
+
     __tablename__ = "community_members"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
+
     community_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("communities.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
 
     role: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=MemberRole.MEMBER, index=True
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=MembershipStatus.ACTIVE, index=True
+        String(20),
+        nullable=False,
+        default=MemberRole.MEMBER,
+        index=True,
     )
 
-    # Relationships
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=MembershipStatus.ACTIVE,
+        index=True,
+    )
+
     community: Mapped["Community"] = relationship("Community", back_populates="members")
 
     __table_args__ = (
@@ -64,26 +90,43 @@ class JoinRequest(AuditMixin, Base):
     Records a user's request to join a private or approval-required community.
     After approval/rejection the record is kept for audit purposes.
     """
+
     __tablename__ = "join_requests"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
+
     community_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("communities.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    requester_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    requester_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
 
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=JoinRequestStatus.PENDING, index=True
-    )
-    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
 
-    # Relationships
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=JoinRequestStatus.PENDING,
+        index=True,
+    )
+
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
     community: Mapped["Community"] = relationship("Community", back_populates="join_requests")
 
     __table_args__ = (

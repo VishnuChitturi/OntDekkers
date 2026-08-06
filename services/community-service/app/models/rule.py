@@ -7,10 +7,20 @@ Design rules:
 - Rules are ordered by order_index (ascending).
 - Only owners and moderators can create/modify/delete rules.
 """
+
 import uuid
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import UUID, ForeignKey, Index, Integer, String, Text
+
+from sqlalchemy import (
+    UUID,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from shared.database import Base, AuditMixin
 
 if TYPE_CHECKING:
@@ -22,11 +32,16 @@ class CommunityRule(AuditMixin, Base):
     A rule for a community.
     Communities can have multiple ordered rules visible to all members.
     """
+
     __tablename__ = "community_rules"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
+
     community_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("communities.id", ondelete="CASCADE"),
@@ -38,7 +53,6 @@ class CommunityRule(AuditMixin, Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    # Relationships
     community: Mapped["Community"] = relationship("Community", back_populates="rules")
 
     __table_args__ = (
@@ -46,4 +60,4 @@ class CommunityRule(AuditMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"<CommunityRule community={self.community_id} title={self.title} order={self.order_index}>"
+        return f"<CommunityRule community={self.community_id} title={self.title!r} order={self.order_index}>"
