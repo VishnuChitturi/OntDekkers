@@ -8,8 +8,8 @@
  *   - Live search across title, content, location, tags, author, and community
  *   - Create Post Composer with media, tags, and community assignment
  *   - Timeline cards with like, bookmark, comment, and share interactions
- *   - Right Sidebar: Trending Communities (Join/Joined), Suggested Travelers (Follow/Following),
- *     Upcoming Expeditions (Clickable -> /expeditions/[id])
+ *   - Right Sidebar: Trending Communities (from backend), Feature coming soon
+ *     (Suggested Travelers), Upcoming Expeditions (from backend)
  */
 
 import React, { useState, useMemo } from "react";
@@ -26,21 +26,19 @@ import {
   Send,
   Sparkles,
   Calendar,
-  CheckCircle2,
-  UserPlus,
-  UserCheck,
+  Clock,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import Search from "@/components/navigation/Search";
-import { swrFetcherWithParams, feedKeys } from "@/services/cache";
+import { swrFetcherWithParams, feedKeys, communityKeys, expeditionKeys } from "@/services/cache";
 import { joinCommunity } from "@/services/communityApi";
 import { useToast } from "@/hooks/useToast";
 import { useAuth } from "@/contexts/AuthContext";
-import type { PostSummary, PaginatedResponse } from "@/types";
+import type { PostSummary, PaginatedResponse, CommunitySummary, ExpeditionSummary } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Realistic Mock Fallback Feed Items
+// Extended Post Interface (client-side UI model with local state)
 // ---------------------------------------------------------------------------
 
 interface ExtendedPost {
@@ -62,83 +60,7 @@ interface ExtendedPost {
   comments: { id: string; author: string; text: string; time: string }[];
 }
 
-const INITIAL_MOCK_POSTS: ExtendedPost[] = [
-  {
-    id: "mock-1",
-    authorName: "Elena Rostova",
-    authorHandle: "elena_explores",
-    authorAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
-    communityName: "Alpine Explorers",
-    title: "Sunrise at Lauterbrunnen Valley",
-    content: "Woke up at 4:30 AM to catch the morning fog lifting over the cliffs. Slow travel really teaches you to appreciate stillness. Watching the waterfalls catch the first golden rays was pure magic.",
-    imageUrl: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80",
-    location: "Lauterbrunnen, Switzerland",
-    tags: ["SwissAlps", "SlowTravel", "SunriseHike"],
-    likeCount: 42,
-    commentCount: 8,
-    isLiked: false,
-    isBookmarked: true,
-    createdAt: "2 hours ago",
-    comments: [
-      { id: "c1", author: "Marco Silva", text: "Stunning shot! Did you take the train up to Mürren afterwards?", time: "1 hour ago" },
-      { id: "c2", author: "Elena Rostova", text: "Yes! Hiked down through Gimmelwald right after.", time: "45 mins ago" },
-    ],
-  },
-  {
-    id: "mock-2",
-    authorName: "Kenji Sato",
-    authorHandle: "kenji_kyoto",
-    authorAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
-    communityName: "Nordic & Asian Trails",
-    title: "Off-the-beaten-path tea house in Uji",
-    content: "Skipped the crowded spots in Kyoto and headed south to Uji. Found a 200-year-old family-run tea farm where the master spent two hours explaining shaded matcha cultivation.",
-    imageUrl: "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=80",
-    location: "Uji, Kyoto, Japan",
-    tags: ["JapanTravel", "MatchaCulture", "LocalHosts"],
-    likeCount: 67,
-    commentCount: 12,
-    isLiked: true,
-    isBookmarked: false,
-    createdAt: "5 hours ago",
-    comments: [
-      { id: "c3", author: "Sarah Jenkins", text: "Saving this for my trip in October!", time: "3 hours ago" },
-    ],
-  },
-  {
-    id: "mock-3",
-    authorName: "Amara Diallo",
-    authorHandle: "amara_treks",
-    authorAvatar: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=150&q=80",
-    communityName: null, // Public story
-    title: "Solo Backpacking across Iceland's Ring Road",
-    content: "Day 4 on the south coast. The solitude here is therapeutic. Stopped by a geothermal hot stream near Vik while glaciers glinted in the distance.",
-    imageUrl: "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?auto=format&fit=crop&w=1200&q=80",
-    location: "Vik, Iceland",
-    tags: ["SoloTravel", "Iceland", "RingRoad"],
-    likeCount: 89,
-    commentCount: 15,
-    isLiked: false,
-    isBookmarked: false,
-    createdAt: "1 day ago",
-    comments: [],
-  },
-];
-
-const TRENDING_COMMUNITIES = [
-  { id: "comm-1", name: "Alpine Explorers", members: 1420, category: "Mountain Treks", icon: "🏔️" },
-  { id: "comm-2", name: "Nordic Trail Seekers", members: 980, category: "Slow Travel", icon: "🌲" },
-  { id: "comm-3", name: "Mediterranean Coast", members: 2150, category: "Coastal & Sailing", icon: "🌊" },
-];
-
-const SUGGESTED_TRAVELERS = [
-  { id: "t-1", name: "Sofia Chen", handle: "sofia_trails", location: "Oslo, Norway", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80", isGuide: true },
-  { id: "t-2", name: "Lukas Weber", handle: "lukas_alps", location: "Innsbruck, Austria", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=80", isGuide: true },
-];
-
-const UPCOMING_EXPEDITIONS = [
-  { id: "exp-1", title: "Dolomites Autumn Ridge Trek", date: "Sep 15 - 20", location: "South Tyrol, Italy", spotsLeft: 3 },
-  { id: "exp-2", title: "Fjord Kayaking & Camping", date: "Oct 02 - 07", location: "Flam, Norway", spotsLeft: 2 },
-];
+// Sidebar data now loaded from backend — see sidebar section below
 
 // ---------------------------------------------------------------------------
 // FeedView Component
@@ -153,12 +75,11 @@ export default function FeedView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "community">("all");
 
-  // Local post feed state
-  const [posts, setPosts] = useState<ExtendedPost[]>(INITIAL_MOCK_POSTS);
+  // Local post feed state (user-created posts that are not yet persisted)
+  const [localPosts, setLocalPosts] = useState<ExtendedPost[]>([]);
 
   // Interactive sidebar state
-  const [followedTravelers, setFollowedTravelers] = useState<Set<string>>(new Set());
-  const [joinedCommunities, setJoinedCommunities] = useState<Set<string>>(new Set(["comm-1"]));
+  const [joinedCommunities, setJoinedCommunities] = useState<Set<string>>(new Set());
 
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
@@ -166,7 +87,7 @@ export default function FeedView() {
   const [newContent, setNewContent] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [newImageUrl, setNewImageUrl] = useState("");
-  const [selectedCommunity, setSelectedCommunity] = useState("Alpine Explorers");
+  const [selectedCommunity, setSelectedCommunity] = useState("");
 
   // Fetch API feed if available
   const { data } = useSWR<PaginatedResponse<PostSummary>>(
@@ -176,10 +97,30 @@ export default function FeedView() {
     { revalidateOnFocus: false }
   );
 
-  // Combine API items with local mock posts when available
-  const displayPosts = useMemo(() => {
-    let combined = [...posts];
+  // Fetch trending communities (sorted by member count on backend, top 3)
+  const { data: communitiesData } = useSWR<PaginatedResponse<CommunitySummary>>(
+    communityKeys.list({ page_size: 3 }),
+    ([url, params]: [string, Record<string, unknown>]) =>
+      swrFetcherWithParams(url, params),
+    { revalidateOnFocus: false }
+  );
 
+  // Fetch upcoming expeditions (recent, public, top 2)
+  const { data: expeditionsData } = useSWR<PaginatedResponse<ExpeditionSummary>>(
+    expeditionKeys.mine({ page_size: 2, visibility: "PUBLIC" }),
+    ([url, params]: [string, Record<string, unknown>]) =>
+      swrFetcherWithParams(url, params),
+    { revalidateOnFocus: false }
+  );
+
+  const trendingCommunities = communitiesData?.items ?? [];
+  const upcomingExpeditions = expeditionsData?.items ?? [];
+
+  // Combine API items with local user-created posts
+  const displayPosts = useMemo(() => {
+    let combined: ExtendedPost[] = [];
+
+    // Map backend posts to ExtendedPost format
     if (data?.items && data.items.length > 0) {
       const apiItems: ExtendedPost[] = data.items.map((item) => ({
         id: item.id,
@@ -191,20 +132,19 @@ export default function FeedView() {
         content: item.title,
         imageUrl: item.coverImageUrl ?? null,
         location: item.location ?? "Global Journey",
-        tags: item.tags ?? ["SlowTravel"],
+        tags: item.tags ?? [],
         likeCount: item.likeCount ?? 0,
         commentCount: item.commentCount ?? 0,
         isLiked: item.isLiked ?? false,
         isBookmarked: item.isBookmarked ?? false,
-        createdAt: "Recently",
+        createdAt: new Date(item.createdAt).toLocaleDateString(),
         comments: [],
       }));
-      // Merge unique
-      const existingIds = new Set(combined.map((p) => p.id));
-      apiItems.forEach((item) => {
-        if (!existingIds.has(item.id)) combined.push(item);
-      });
+      combined = apiItems;
     }
+
+    // Prepend local posts (newly created by user)
+    combined = [...localPosts, ...combined];
 
     // Apply Segmented Control Filter ("All Stories" vs "Communities")
     if (activeFilter === "community") {
@@ -227,7 +167,7 @@ export default function FeedView() {
     }
 
     return combined;
-  }, [posts, data?.items, activeFilter, searchQuery]);
+  }, [localPosts, data?.items, activeFilter, searchQuery]);
 
   // Handle Post Creation
   function handleCreatePost(e: React.FormEvent) {
@@ -242,7 +182,9 @@ export default function FeedView() {
       authorName: user?.email.split("@")[0] ?? "You",
       authorHandle: user?.email.split("@")[0] ?? "you",
       authorAvatar: null,
-      communityName: selectedCommunity === "Public Feed (No Community)" ? null : selectedCommunity,
+      communityName: selectedCommunity
+        ? (trendingCommunities.find((c) => c.id === selectedCommunity)?.name ?? null)
+        : null,
       title: newTitle.trim() || "Travel Note",
       content: newContent.trim(),
       imageUrl: newImageUrl.trim() || null,
@@ -256,7 +198,7 @@ export default function FeedView() {
       comments: [],
     };
 
-    setPosts([created, ...posts]);
+    setLocalPosts([created, ...localPosts]);
     setNewTitle("");
     setNewContent("");
     setNewLocation("");
@@ -267,7 +209,7 @@ export default function FeedView() {
 
   // Toggle Like
   function handleToggleLike(postId: string) {
-    setPosts((prev) =>
+    setLocalPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
           const isLiked = !p.isLiked;
@@ -284,7 +226,7 @@ export default function FeedView() {
 
   // Toggle Bookmark
   function handleToggleBookmark(postId: string) {
-    setPosts((prev) =>
+    setLocalPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
           const isBookmarked = !p.isBookmarked;
@@ -307,23 +249,8 @@ export default function FeedView() {
     }
   }
 
-  // Follow traveler toggle
-  function handleToggleFollow(traveler: typeof SUGGESTED_TRAVELERS[0]) {
-    setFollowedTravelers((prev) => {
-      const next = new Set(prev);
-      if (next.has(traveler.handle)) {
-        next.delete(traveler.handle);
-        showToast(`Unfollowed ${traveler.name}`, "info");
-      } else {
-        next.add(traveler.handle);
-        showToast(`Now following ${traveler.name}!`, "success");
-      }
-      return next;
-    });
-  }
-
   // Join community toggle
-  async function handleToggleJoin(community: typeof TRENDING_COMMUNITIES[0]) {
+  async function handleToggleJoin(community: CommunitySummary) {
     const isJoined = joinedCommunities.has(community.id);
     
     // Optimistic UI update
@@ -357,7 +284,7 @@ export default function FeedView() {
     const text = commentInput[postId]?.trim();
     if (!text) return;
 
-    setPosts((prev) =>
+    setLocalPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
           const newComment = {
@@ -382,18 +309,8 @@ export default function FeedView() {
 
   return (
     <div className="space-y-6">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* ── Filter Controls + Search ───────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111111]">
-            Feed
-          </h1>
-          <p className="text-sm text-gray-500">
-            Real stories, expedition notes, and updates from travelers worldwide.
-          </p>
-        </div>
-
-        {/* Filter Pills / Segmented Control */}
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -491,10 +408,10 @@ export default function FeedView() {
                     onChange={(e) => setSelectedCommunity(e.target.value)}
                     className="rounded-xl border border-[#EAE7DF] bg-white px-3 py-1.5 text-xs text-gray-700 outline-none"
                   >
-                    <option value="Alpine Explorers">Alpine Explorers</option>
-                    <option value="Nordic Trail Seekers">Nordic Trail Seekers</option>
-                    <option value="Desert & Oasis Society">Desert & Oasis Society</option>
-                    <option value="Public Feed (No Community)">Public Feed (No Community)</option>
+                    <option value="">Public Feed (No Community)</option>
+                    {trendingCommunities.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
                   </select>
 
                   <div className="flex items-center gap-2">
@@ -739,102 +656,63 @@ export default function FeedView() {
             </div>
 
             <div className="space-y-3">
-              {TRENDING_COMMUNITIES.map((c) => {
-                const isJoined = joinedCommunities.has(c.id);
-                return (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#FBF9F4] transition-colors cursor-pointer"
-                    onClick={() => router.push(`/communities/${c.id}`)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{c.icon}</span>
-                      <div>
-                        <h4 className="text-xs font-bold text-[#111111]">{c.name}</h4>
-                        <p className="text-[11px] text-gray-500">
-                          {(c.members + (isJoined ? 1 : 0)).toLocaleString()} members
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleJoin(c);
-                      }}
-                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                        isJoined
-                          ? "bg-gray-100 text-gray-600 border border-gray-200"
-                          : "border border-[#EAE7DF] bg-white text-[#111111] hover:bg-gray-100"
-                      }`}
+              {trendingCommunities.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">
+                  No communities yet
+                </p>
+              ) : (
+                trendingCommunities.map((c) => {
+                  const isJoined = joinedCommunities.has(c.id);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#FBF9F4] transition-colors cursor-pointer"
+                      onClick={() => router.push(`/communities/${c.id}`)}
                     >
-                      {isJoined ? "Joined" : "Join"}
-                    </button>
-                  </div>
-                );
-              })}
+                      <div className="flex items-center gap-3">
+                        <div className="size-8 rounded-full bg-gradient-to-br from-[#111111] to-gray-600 flex items-center justify-center text-white text-xs font-bold">
+                          {c.name.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-[#111111]">{c.name}</h4>
+                          <p className="text-[11px] text-gray-500">
+                            {c.memberCount.toLocaleString()} members
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleJoin(c);
+                        }}
+                        className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
+                          isJoined
+                            ? "bg-gray-100 text-gray-600 border border-gray-200"
+                            : "border border-[#EAE7DF] bg-white text-[#111111] hover:bg-gray-100"
+                        }`}
+                      >
+                        {isJoined ? "Joined" : "Join"}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          {/* Suggested Travelers & Guides */}
+          {/* Suggested Travelers — Feature coming soon */}
           <div className="rounded-2xl border border-[#EAE7DF] bg-white p-5 space-y-4 shadow-2xs">
             <h3 className="font-bold text-sm text-[#111111] flex items-center gap-2">
               <Users size={16} />
               Suggested Travelers
             </h3>
-
-            <div className="space-y-3">
-              {SUGGESTED_TRAVELERS.map((t) => {
-                const isFollowing = followedTravelers.has(t.handle);
-                return (
-                  <div
-                    key={t.handle}
-                    className="flex items-center justify-between p-2 rounded-xl hover:bg-[#FBF9F4] transition-colors cursor-pointer"
-                    onClick={() => router.push(`/users/${t.handle}`)}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={t.avatar}
-                        alt={t.name}
-                        className="size-9 rounded-full object-cover border border-[#EAE7DF]"
-                      />
-                      <div>
-                        <div className="flex items-center gap-1">
-                          <h4 className="text-xs font-bold text-[#111111]">{t.name}</h4>
-                          {t.isGuide && (
-                            <CheckCircle2 size={12} className="text-blue-600 fill-blue-100" />
-                          )}
-                        </div>
-                        <p className="text-[10px] text-gray-400">{t.location}</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleFollow(t);
-                      }}
-                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                        isFollowing
-                          ? "bg-gray-100 text-gray-700 border border-gray-200"
-                          : "bg-[#111111] text-white hover:bg-[#333333]"
-                      }`}
-                    >
-                      {isFollowing ? (
-                        <>
-                          <UserCheck size={12} />
-                          Following
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus size={12} />
-                          Follow
-                        </>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
+            <div className="flex flex-col items-center justify-center py-5 space-y-2 text-center">
+              <Clock size={24} className="text-gray-300" />
+              <p className="text-xs font-semibold text-gray-500">Feature coming soon</p>
+              <p className="text-[11px] text-gray-400">
+                Traveler recommendations will appear here.
+              </p>
             </div>
           </div>
 
@@ -846,24 +724,38 @@ export default function FeedView() {
             </h3>
 
             <div className="space-y-3">
-              {UPCOMING_EXPEDITIONS.map((exp) => (
-                <div
-                  key={exp.id}
-                  onClick={() => router.push(`/expeditions/${exp.id}`)}
-                  className="p-3 rounded-xl border border-[#EAE7DF] bg-[#FBF9F4] space-y-1.5 cursor-pointer hover:border-gray-400 hover:bg-white transition-all shadow-2xs"
-                >
-                  <h4 className="text-xs font-bold text-[#111111] hover:underline">{exp.title}</h4>
-                  <div className="flex items-center justify-between text-[11px] text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Calendar size={12} />
-                      {exp.date}
-                    </span>
-                    <span className="font-medium text-[#111111]">
-                      {exp.spotsLeft} spots left
-                    </span>
+              {upcomingExpeditions.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">
+                  No upcoming expeditions yet
+                </p>
+              ) : (
+                upcomingExpeditions.map((exp) => (
+                  <div
+                    key={exp.id}
+                    onClick={() => router.push(`/expeditions/${exp.id}`)}
+                    className="p-3 rounded-xl border border-[#EAE7DF] bg-[#FBF9F4] space-y-1.5 cursor-pointer hover:border-gray-400 hover:bg-white transition-all shadow-2xs"
+                  >
+                    <h4 className="text-xs font-bold text-[#111111] hover:underline">{exp.title}</h4>
+                    <div className="flex items-center justify-between text-[11px] text-gray-500">
+                      {exp.startDate ? (
+                        <span className="flex items-center gap-1">
+                          <Calendar size={12} />
+                          {new Date(exp.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {exp.endDate && ` - ${new Date(exp.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <MapPin size={12} />
+                          {exp.destination}
+                        </span>
+                      )}
+                      <span className="font-medium text-[#111111]">
+                        {exp.maxParticipants} spots
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </aside>

@@ -20,103 +20,6 @@ import CommunityCardSkeleton from "./CommunityCardSkeleton";
 import type { CommunitySummary, PaginatedResponse } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Realistic Mock Fallback Communities
-// ---------------------------------------------------------------------------
-
-const MOCK_COMMUNITIES: CommunitySummary[] = [
-  {
-    id: "comm-1",
-    name: "Alpine Explorers",
-    slug: "alpine-explorers",
-    description: "Passionate mountain hikers, summit seekers, and slow travelers in the European Alps.",
-    bannerUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PUBLIC",
-    category: "Mountain Treks",
-    location: "Alps, Europe",
-    memberCount: 1420,
-    expeditionCount: 8,
-    isMember: true,
-    status: "ACTIVE",
-  },
-  {
-    id: "comm-2",
-    name: "Nordic Trail Seekers",
-    slug: "nordic-trail-seekers",
-    description: "Fjord kayaking, hut-to-hut trekking, and winter expeditions across Norway and Sweden.",
-    bannerUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PUBLIC",
-    category: "Slow Travel",
-    location: "Scandinavia",
-    memberCount: 980,
-    expeditionCount: 5,
-    isMember: false,
-    status: "ACTIVE",
-  },
-  {
-    id: "comm-3",
-    name: "Mediterranean Coast & Sailing",
-    slug: "mediterranean-coast",
-    description: "Island hopping, coastal trail hiking, and culinary journeys around the Med.",
-    bannerUrl: "https://images.unsplash.com/photo-1533105079780-92b9be482077?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PUBLIC",
-    category: "Coastal & Sailing",
-    location: "Southern Europe",
-    memberCount: 2150,
-    expeditionCount: 12,
-    isMember: false,
-    status: "ACTIVE",
-  },
-  {
-    id: "comm-4",
-    name: "Sahara & Oasis Society",
-    slug: "sahara-oasis-society",
-    description: "Desert expeditions, stargazing encampments, and Berber cultural exchanges.",
-    bannerUrl: "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PRIVATE",
-    category: "Desert Treks",
-    location: "North Africa",
-    memberCount: 540,
-    expeditionCount: 3,
-    isMember: false,
-    status: "ACTIVE",
-  },
-  {
-    id: "comm-5",
-    name: "Kyoto Cultural Heritage",
-    slug: "kyoto-heritage",
-    description: "Exploring ancient temples, traditional tea farms, and hidden alleyways of Kansai.",
-    bannerUrl: "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PUBLIC",
-    category: "Cultural Immersion",
-    location: "Kyoto, Japan",
-    memberCount: 1890,
-    expeditionCount: 7,
-    isMember: true,
-    status: "ACTIVE",
-  },
-  {
-    id: "comm-6",
-    name: "Patagonia Wilderness Club",
-    slug: "patagonia-wilderness",
-    description: "Torres del Paine W-Trek, glacier kayaking, and remote camping in southern Chile & Argentina.",
-    bannerUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80",
-    logoUrl: null,
-    visibility: "PUBLIC",
-    category: "Backpacking",
-    location: "Patagonia, South America",
-    memberCount: 760,
-    expeditionCount: 4,
-    isMember: false,
-    status: "ACTIVE",
-  },
-];
-
-// ---------------------------------------------------------------------------
 // Filter Chip
 // ---------------------------------------------------------------------------
 
@@ -179,9 +82,9 @@ export default function CommunitiesView() {
     { revalidateOnFocus: false }
   );
 
-  // Combine API results with fallback mock communities
+  // Filter API results — no mock fallback
   const filteredCommunities = useMemo(() => {
-    let list = data?.items && data.items.length > 0 ? data.items : MOCK_COMMUNITIES;
+    let list: CommunitySummary[] = data?.items ?? [];
 
     if (publicOnly) {
       list = list.filter((c) => c.visibility === "PUBLIC");

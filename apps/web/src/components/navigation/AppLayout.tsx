@@ -23,9 +23,11 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import useSWR from "swr";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { useAuth } from "@/contexts/AuthContext";
+import { getMyProfile } from "@/services/users";
 import { cn } from "@/lib/utils";
 
 interface AppLayoutProps {
@@ -62,8 +64,23 @@ const NAV_ITEMS = [
 
 export function AppLayout({ children }: AppLayoutProps) {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Fetch full user profile for sidebar display (only when authenticated)
+  const { data: profile } = useSWR(
+    isAuthenticated ? "/users/me" : null,
+    () => getMyProfile(),
+    { revalidateOnFocus: false }
+  );
+
+  // Resolve display values: prefer profile data, fall back to auth user email
+  const displayName = profile?.display_name ?? profile?.username ?? user?.email ?? "";
+  const displaySubtitle = profile?.username ? `@${profile.username}` : user?.email ?? "";
+  const avatarInitial = (profile?.display_name ?? profile?.username ?? user?.email ?? "U")
+    .charAt(0)
+    .toUpperCase();
+  const avatarUrl = profile?.avatar_url ?? null;
 
   return (
     <ProtectedRoute>
@@ -113,7 +130,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
             <div className="border-t border-[#EAE7DF] pt-4 flex items-center justify-between">
               <div className="truncate text-xs text-gray-500 font-medium">
-                {user?.email}
+                {displayName || user?.email}
               </div>
               <LogoutButton />
             </div>
@@ -161,14 +178,24 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="border-t border-[#EAE7DF] pt-4 space-y-3">
             {user && (
               <div className="flex items-center gap-2.5 px-1">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#111111] text-xs font-bold text-white">
-                  {user.email.charAt(0).toUpperCase()}
-                </div>
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={displayName}
+                    className="size-8 shrink-0 rounded-full object-cover border border-[#EAE7DF]"
+                  />
+                ) : (
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#111111] text-xs font-bold text-white">
+                    {avatarInitial}
+                  </div>
+                )}
                 <div className="truncate">
                   <p className="truncate text-xs font-semibold text-[#111111]">
-                    {user.email}
+                    {displayName}
                   </p>
-                  <p className="text-[10px] text-gray-400">Authenticated</p>
+                  <p className="truncate text-[10px] text-gray-400">
+                    {displaySubtitle}
+                  </p>
                 </div>
               </div>
             )}

@@ -14,6 +14,18 @@
 #     Internal:  http://user-service:8000/users/*
 #     (FastAPI router mounted at prefix="/users")
 #
+#   Feed Service
+#     External:  http://localhost/api/v1/feed/*
+#     Stripped:  (none — internal prefix matches external prefix)
+#     Internal:  http://feed-service:8000/api/v1/feed/*
+#     (FastAPI routers each declare prefix="/api/v1/feed")
+#
+#   Community Service
+#     External:  http://localhost/api/v1/communities/*
+#     Stripped:  (none — internal prefix matches external prefix)
+#     Internal:  http://community-service:8000/api/v1/communities/*
+#     (FastAPI router registered with prefix="/api/v1/communities" in main.py)
+#
 # Container hostnames resolve via Docker Compose's internal DNS
 # (services share the default Compose network with Traefik).
 
@@ -37,6 +49,18 @@ http:
       middlewares:
         - user-strip
       service: user-service
+
+    feed-service:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/v1/feed`)"
+      service: feed-service
+
+    community-service:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/v1/communities`)"
+      service: community-service
 
   # ── Middlewares ────────────────────────────────────────────────────────────
   middlewares:
@@ -67,3 +91,17 @@ http:
           # Traefik reaches user-service over the shared Compose network.
           # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
           - url: "http://user-service:8000"
+
+    feed-service:
+      loadBalancer:
+        servers:
+          # Traefik reaches feed-service over the shared Compose network.
+          # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
+          - url: "http://feed-service:8000"
+
+    community-service:
+      loadBalancer:
+        servers:
+          # Traefik reaches community-service over the shared Compose network.
+          # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
+          - url: "http://community-service:8000"
