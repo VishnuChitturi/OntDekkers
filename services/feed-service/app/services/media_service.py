@@ -7,6 +7,7 @@ and bucket management.
 """
 
 import asyncio
+import json
 import uuid
 from datetime import timedelta
 from typing import Optional
@@ -23,9 +24,20 @@ from shared.exceptions import NotFoundError, ForbiddenError
 # MinIO bucket for post media
 POST_BUCKET = "posts"
 
+# MinIO / S3 region.  MinIO uses us-east-1 by default and this value is present
+# in every presigned URL credential string.  Pre-setting the region on SDK
+# clients that cannot reach MinIO over the network (e.g. the public client that
+# uses localhost:9000 inside the container) allows those clients to skip the
+# GetBucketLocation HTTP call that _get_region() would otherwise make.
+_MINIO_REGION = "us-east-1"
+
 
 def _build_minio_client() -> Minio:
-    """Construct a MinIO client from application settings."""
+    """Construct a MinIO client using the internal Docker endpoint (minio:9000).
+
+    Used for operations that require a live connection to MinIO: bucket existence
+    checks and bucket creation.
+    """
     return Minio(
         endpoint=settings.MINIO_ENDPOINT,
         access_key=settings.MINIO_ACCESS_KEY,
@@ -34,10 +46,61 @@ def _build_minio_client() -> Minio:
     )
 
 
+def _build_minio_public_client() -> Minio:
+    """Construct a MinIO client using the browser-accessible endpoint (localhost:9000).
+
+    Used exclusively for presigned URL generation.  Presigned URLs produced by
+    this client embed localhost:9000 as the host, making them directly usable by
+    browsers outside the Docker network.
+
+    WHY THIS WORKS WITHOUT A LIVE CONNECTION TO localhost:9000:
+    The MinIO SDK's _get_region() makes an HTTP GET /<bucket>?location= request
+    to resolve the bucket region, but ONLY when the region is not already known.
+    By passing region=_MINIO_REGION we bypass that HTTP call entirely — the SDK
+    uses the pre-set value and proceeds directly to signing the URL.  No real
+    network connection to localhost:9000 is ever opened during URL generation.
+
+    The resulting URL is signed with host=localhost:9000, so when a browser sends
+    the PUT request to localhost:9000 the HMAC-SHA256 signature is valid.
+    """
+    return Minio(
+        endpoint=settings.MINIO_PUBLIC_ENDPOINT,
+        access_key=settings.MINIO_ACCESS_KEY,
+        secret_key=settings.MINIO_SECRET_KEY,
+        secure=settings.MINIO_SECURE,
+        region=_MINIO_REGION,  # pre-set → skips GetBucketLocation HTTP call
+    )
+
+
 def _ensure_bucket(client: Minio, bucket: str) -> None:
-    """Create the bucket if it does not already exist (synchronous)."""
+    """Create the bucket if it does not already exist, then ensure it has a
+    public-read policy so browsers can fetch uploaded objects directly via
+    their stored media_url (http://localhost:9000/{bucket}/...).
+
+    MinIO buckets are private by default.  Without a public-read policy every
+    unauthenticated GET request to the stored media_url returns 403
+    AccessDenied, causing broken images in the feed even when the upload
+    succeeded.  Setting the policy here is idempotent — it is re-applied on
+    every presigned URL generation call, which is fine for local development.
+    """
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
+
+    # S3-compatible public-read bucket policy
+    public_read_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": ["*"]},
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{bucket}/*"],
+                }
+            ],
+        }
+    )
+    client.set_bucket_policy(bucket, public_read_policy)
 
 
 class MediaService:
@@ -100,7 +163,7 @@ class MediaService:
 
         The client has already uploaded the binary to MinIO before calling this.
         Derives the permanent public media_url from the object_key using the
-        configured MinIO endpoint.
+        configured public MinIO endpoint so the URL is browser-accessible.
 
         Post author only.
         """
@@ -111,11 +174,11 @@ class MediaService:
         if post.author_id != user_id:
             raise ForbiddenError("You can only add media to your own posts")
 
-        # Build a permanent public URL: http(s)://<endpoint>/<object_key>
-        # The object_key already includes the bucket prefix (posts/<post_id>/<uuid>.ext)
-        # so the URL must not double-insert the bucket name.
+        # Build a permanent public URL using the browser-accessible endpoint.
+        # object_key already includes the bucket prefix (posts/<post_id>/<uuid>.ext).
+        # This is pure string construction — no SDK call, no signature involved.
         scheme = "https" if settings.MINIO_SECURE else "http"
-        media_url = f"{scheme}://{settings.MINIO_ENDPOINT}/{request.object_key}"
+        media_url = f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{request.object_key}"
 
         media = await self.post_repo.add_media(
             post_id=post_id,
@@ -137,23 +200,35 @@ class MediaService:
 
         Runs inside a thread pool executor (called via run_in_executor).
 
-        The stored object_key has the form  posts/{post_id}/{uuid}.ext  so that the
-        public URL (scheme://endpoint/object_key) resolves without an explicit bucket
-        segment.  When calling the MinIO SDK we strip the leading "posts/" prefix
-        because the SDK inserts the bucket name in the URL path itself:
+        Two clients are used for different reasons:
+        - Internal client (_build_minio_client): connects to minio:9000 to check
+          / create the bucket.  This requires a real network call inside Docker.
+        - Public client (_build_minio_public_client): generates the presigned URL
+          with localhost:9000 as the host.  Region is pre-set so no network call
+          is made.  The resulting URL is valid for browser PUT requests.
+
+        Object-key normalisation:
+        The stored object_key has the form  posts/{post_id}/{uuid}.ext.  When
+        calling the SDK we strip the leading "posts/" prefix because the SDK
+        inserts the bucket name in the URL path itself:
           presigned_put_object("posts", "{post_id}/{uuid}.ext")
-          → http://minio:9000/posts/{post_id}/{uuid}.ext?…   (correct)
-        Passing the full object_key would produce the doubled path /posts/posts/…
+          → http://localhost:9000/posts/{post_id}/{uuid}.ext?…   (correct)
+        Passing the full key would produce the doubled path /posts/posts/…
         """
-        client = _build_minio_client()
-        _ensure_bucket(client, POST_BUCKET)
+        # Bucket ops require a live connection — use internal client
+        internal_client = _build_minio_client()
+        _ensure_bucket(internal_client, POST_BUCKET)
+
+        # URL generation uses public client — region pre-set, no network call
+        public_client = _build_minio_public_client()
         bucket_prefix = POST_BUCKET + "/"
         sdk_object_name = (
             object_key[len(bucket_prefix):]
             if object_key.startswith(bucket_prefix)
             else object_key
         )
-        return client.presigned_put_object(
+
+        return public_client.presigned_put_object(
             POST_BUCKET,
             sdk_object_name,
             expires=timedelta(hours=1),

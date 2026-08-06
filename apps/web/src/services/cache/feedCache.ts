@@ -14,5 +14,5 @@ export const feedKeys = {
   byCommunity: (communityId: string, page = 1) =>
     `/feed/api/v1/feed/communities/${communityId}?page=${page}`,
   comments: (postId: string, page = 1) =>
-    `/feed/api/v1/feed/stories/${postId}/comments?page=${page}`,
+    `/feed/api/v1/feed/posts/${postId}/comments?page=${page}`,
 } as const;

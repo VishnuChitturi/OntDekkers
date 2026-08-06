@@ -93,6 +93,14 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
+      # MINIO_SERVER_URL instructs MinIO to embed this URL as the host in all
+      # presigned URLs it generates.  Backend services connect to MinIO via the
+      # internal hostname (minio:9000), but the presigned URLs returned to the
+      # browser must use localhost:9000, which is what browsers can resolve.
+      # The HMAC-SHA256 signature is computed by MinIO using this host value, so
+      # the signature remains valid when the browser sends the PUT request to
+      # localhost:9000.
+      MINIO_SERVER_URL: "http://localhost:9000"
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -184,7 +192,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/guide_db
       ENVIRONMENT: development
-      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_SECRET: dev_secret_key_replace_this_in_production
     depends_on:
       postgres:
         condition: service_healthy
@@ -203,7 +211,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trip_db
       ENVIRONMENT: development
-      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_SECRET: dev_secret_key_replace_this_in_production
     depends_on:
       postgres:
         condition: service_healthy
@@ -221,7 +229,7 @@ services:
       - "8004:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/community_db
-      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_SECRET: dev_secret_key_replace_this_in_production
       JWT_ALGORITHM: HS256
       SERVICE_NAME: community-service
       ENVIRONMENT: development
@@ -251,11 +259,14 @@ services:
       - "8005:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/feed_db
-      JWT_SECRET: default_secret_key_change_me_in_production
+      JWT_SECRET: dev_secret_key_replace_this_in_production
       JWT_ALGORITHM: HS256
       SERVICE_NAME: feed-service
       ENVIRONMENT: development
+      # Internal endpoint: used for backend-to-MinIO SDK communication inside Docker
       MINIO_ENDPOINT: minio:9000
+      # Public endpoint: embedded in presigned URLs returned to the browser
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin123
       KAFKA_URL: kafka:29092

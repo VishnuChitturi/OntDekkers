@@ -18,7 +18,6 @@ import type {
   PostSummary,
   PostMedia,
   Comment,
-  Bookmark,
   Share,
   CreatePostRequest,
   UpdatePostRequest,
@@ -27,6 +26,7 @@ import type {
   FeedFilter,
   MediaUploadRequest,
   MediaUploadResponse,
+  RegisterMediaRequest,
 } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,18 @@ export async function getPostsByCommunity(
 
 /** Create a new travel story post */
 export async function createPost(payload: CreatePostRequest): Promise<Post> {
-  const { data } = await apiClient.post("/feed/api/v1/feed/stories", payload);
+  // Backend expects snake_case keys; translate from TS camelCase
+  const backendPayload = {
+    title: payload.title,
+    content: payload.content,
+    location: payload.location,
+    community_id: payload.communityId,
+    expedition_id: payload.expeditionId,
+    tags: payload.tags,
+    visibility: payload.visibility,
+    media_keys: payload.mediaKeys,
+  };
+  const { data } = await apiClient.post("/feed/api/v1/feed/stories", backendPayload);
   return data;
 }
 
@@ -84,9 +95,17 @@ export async function updatePost(
   postId: string,
   payload: UpdatePostRequest,
 ): Promise<Post> {
+  // Backend expects snake_case keys; translate from TS camelCase
+  const backendPayload = {
+    title: payload.title,
+    content: payload.content,
+    location: payload.location,
+    visibility: payload.visibility,
+    tags: payload.tags,
+  };
   const { data } = await apiClient.put(
     `/feed/api/v1/feed/stories/${postId}`,
-    payload,
+    backendPayload,
   );
   return data;
 }
@@ -100,12 +119,78 @@ export async function deletePost(postId: string): Promise<void> {
 // Post media
 // ---------------------------------------------------------------------------
 
-/** Request a pre-signed upload URL for a post media item */
-export async function requestMediaUploadUrl(
+/**
+ * Step 1 — Request a presigned PUT URL for uploading a single image.
+ *
+ * POST /feed/api/v1/feed/posts/{postId}/media/upload-url
+ * Body: { filename, content_type }
+ * Returns: { upload_url, object_key, expires_in }  (camelCased by interceptor)
+ */
+export async function generateMediaUploadUrl(
+  postId: string,
   payload: MediaUploadRequest,
 ): Promise<MediaUploadResponse> {
   const { data } = await apiClient.post(
-    "/feed/api/v1/feed/media/upload-url",
+    `/feed/api/v1/feed/posts/${postId}/media/upload-url`,
+    payload,
+  );
+  return data;
+}
+
+/**
+ * Step 2 — Upload the binary file directly to MinIO via the presigned URL.
+ *
+ * This is a plain HTTP PUT — NOT through the API client — because:
+ *  - The URL is a direct MinIO presigned URL, not the Traefik gateway.
+ *  - We must not send the Authorization header (MinIO presigned URLs are
+ *    self-authenticating via query-string parameters).
+ *  - We must set Content-Type to match what was declared in step 1.
+ */
+export async function uploadFileToMinIO(
+  presignedUrl: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", presignedUrl, true);
+    // MinIO presigned PUT requires the Content-Type to match what was
+    // declared when generating the URL.
+    xhr.setRequestHeader("Content-Type", file.type);
+
+    if (onProgress) {
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`MinIO upload failed with status ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("MinIO upload network error"));
+    xhr.send(file);
+  });
+}
+
+/**
+ * Step 3 — Register the uploaded object with the post in the database.
+ *
+ * POST /feed/api/v1/feed/posts/{postId}/media
+ * Body: { object_key, display_order, alt_text }
+ * Returns: PostMediaSchema
+ */
+export async function registerPostMedia(
+  postId: string,
+  payload: RegisterMediaRequest,
+): Promise<PostMedia> {
+  const { data } = await apiClient.post(
+    `/feed/api/v1/feed/posts/${postId}/media`,
     payload,
   );
   return data;
@@ -114,7 +199,7 @@ export async function requestMediaUploadUrl(
 /** Fetch media items for a specific post */
 export async function getPostMedia(postId: string): Promise<PostMedia[]> {
   const { data } = await apiClient.get(
-    `/feed/api/v1/feed/stories/${postId}/media`,
+    `/feed/api/v1/feed/posts/${postId}/media`,
   );
   return data;
 }
@@ -123,14 +208,32 @@ export async function getPostMedia(postId: string): Promise<PostMedia[]> {
 // Likes
 // ---------------------------------------------------------------------------
 
-/** Like a post */
-export async function likePost(postId: string): Promise<void> {
-  await apiClient.post(`/feed/api/v1/feed/stories/${postId}/like`);
+// Camelcase shape after axios interceptor transforms snake_case response
+export interface LikeActionResponse {
+  postId: string;
+  isLiked: boolean;
+  likeCount: number;
 }
 
-/** Unlike a post */
-export async function unlikePost(postId: string): Promise<void> {
-  await apiClient.delete(`/feed/api/v1/feed/stories/${postId}/like`);
+export interface BookmarkActionResponse {
+  postId: string;
+  isBookmarked: boolean;
+}
+
+/** Like a post — returns updated like state */
+export async function likePost(postId: string): Promise<LikeActionResponse> {
+  const { data } = await apiClient.post(
+    `/feed/api/v1/feed/posts/${postId}/like`,
+  );
+  return data;
+}
+
+/** Unlike a post — returns updated like state */
+export async function unlikePost(postId: string): Promise<LikeActionResponse> {
+  const { data } = await apiClient.delete(
+    `/feed/api/v1/feed/posts/${postId}/like`,
+  );
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,16 +241,23 @@ export async function unlikePost(postId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Bookmark a post */
-export async function bookmarkPost(postId: string): Promise<Bookmark> {
+export async function bookmarkPost(
+  postId: string,
+): Promise<BookmarkActionResponse> {
   const { data } = await apiClient.post(
-    `/feed/api/v1/feed/stories/${postId}/bookmark`,
+    `/feed/api/v1/feed/posts/${postId}/bookmark`,
   );
   return data;
 }
 
 /** Remove a post bookmark */
-export async function unbookmarkPost(postId: string): Promise<void> {
-  await apiClient.delete(`/feed/api/v1/feed/stories/${postId}/bookmark`);
+export async function unbookmarkPost(
+  postId: string,
+): Promise<BookmarkActionResponse> {
+  const { data } = await apiClient.delete(
+    `/feed/api/v1/feed/posts/${postId}/bookmark`,
+  );
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +282,7 @@ export async function getComments(
   params: { page?: number; page_size?: number } = {},
 ): Promise<PaginatedResponse<Comment>> {
   const { data } = await apiClient.get(
-    `/feed/api/v1/feed/stories/${postId}/comments`,
+    `/feed/api/v1/feed/posts/${postId}/comments`,
     { params },
   );
   return data;
@@ -184,7 +294,7 @@ export async function createComment(
   payload: CreateCommentRequest,
 ): Promise<Comment> {
   const { data } = await apiClient.post(
-    `/feed/api/v1/feed/stories/${postId}/comment`,
+    `/feed/api/v1/feed/posts/${postId}/comments`,
     payload,
   );
   return data;

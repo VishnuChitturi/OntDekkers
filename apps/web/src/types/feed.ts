@@ -71,27 +71,46 @@ export interface PostMedia {
   id: UUID;
   postId: UUID;
   mediaUrl: string;
+  objectKey: string;
   mediaType: MediaType;
   displayOrder: number;
+  altText: string | null;
   createdAt: ISODateString;
+  updatedAt: ISODateString;
 }
 
+/**
+ * Request body for POST /posts/{postId}/media/upload-url
+ * Matches the backend MediaUploadRequest schema exactly.
+ */
 export interface MediaUploadRequest {
-  /** The MIME type of the file, e.g. "image/jpeg" */
-  contentType: string;
-  /** Number of bytes */
-  fileSize: number;
-  /** Display order within the post's media gallery */
-  displayOrder?: number;
+  /** Original filename, e.g. "summit.jpg" */
+  filename: string;
+  /** MIME type, e.g. "image/jpeg" */
+  content_type: string;
 }
 
+/**
+ * Response from POST /posts/{postId}/media/upload-url
+ * Matches the backend MediaUploadResponse schema (after camelCase transform).
+ */
 export interface MediaUploadResponse {
   /** Pre-signed PUT URL for uploading directly to MinIO */
   uploadUrl: string;
-  /** Permanent object URL stored in the database after upload */
-  objectUrl: string;
-  /** Opaque key to pass back to the create/update post endpoint */
-  storageKey: string;
+  /** MinIO object key — pass to the register endpoint */
+  objectKey: string;
+  /** Seconds until the presigned URL expires */
+  expiresIn: number;
+}
+
+/**
+ * Request body for POST /posts/{postId}/media
+ * Registers the uploaded object with the post.
+ */
+export interface RegisterMediaRequest {
+  object_key: string;
+  display_order: number;
+  alt_text: string | null;
 }
 
 // ---------------------------------------------------------------------------

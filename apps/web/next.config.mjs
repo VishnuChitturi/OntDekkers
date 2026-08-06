@@ -6,8 +6,17 @@ const nextConfig = {
     // Allow images from MinIO (local development) and future CDN origins
     remotePatterns: [
       {
+        // Browser-accessible MinIO in local development (via Docker port mapping)
         protocol: "http",
         hostname: "localhost",
+        port: "9000",
+        pathname: "/**",
+      },
+      {
+        // Docker-internal MinIO hostname (used when Next.js SSR resolves images
+        // inside the container network, and for presigned URLs before proxying)
+        protocol: "http",
+        hostname: "minio",
         port: "9000",
         pathname: "/**",
       },
@@ -47,7 +56,15 @@ const nextConfig = {
         destination: "http://feed-service:8000/api/:path*",
       },
       {
-        // Community Service — internal Docker hostname
+        // Community Service — root collection endpoint (trailing slash required
+        // by FastAPI to avoid a 307 redirect to http://community-service:8000/…
+        // which the browser cannot resolve as an internal Docker hostname).
+        source: "/communities/api/v1/communities",
+        destination: "http://community-service:8000/api/v1/communities/",
+      },
+      {
+        // Community Service — all other sub-paths (member actions, discussions,
+        // join/leave, rules, etc.) — internal Docker hostname.
         source: "/communities/api/:path*",
         destination: "http://community-service:8000/api/:path*",
       },

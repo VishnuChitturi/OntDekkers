@@ -8,7 +8,10 @@ class Settings(CommonSettings):
     DB_MAX_OVERFLOW: int = 10
 
     # MinIO configuration — values injected by Docker Compose
+    # MINIO_ENDPOINT: internal Docker hostname used for backend-to-MinIO SDK calls
+    # MINIO_PUBLIC_ENDPOINT: browser-accessible host used in presigned URLs and media_url
     MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_PUBLIC_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_SECURE: bool = False
