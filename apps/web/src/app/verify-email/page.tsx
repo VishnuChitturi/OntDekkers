@@ -110,6 +110,11 @@ function OtpForm({ email }: OtpFormProps) {
       }, 1000);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
+        // If already verified, redirect to login directly — no OTP needed.
+        if (err.code === "ALREADY_VERIFIED") {
+          router.replace("/login?verified=1");
+          return;
+        }
         setResendError(err.message);
       } else {
         setResendError("Something went wrong. Please try again.");
@@ -141,6 +146,12 @@ function OtpForm({ email }: OtpFormProps) {
       }, 1000);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
+        // If the email is already verified (e.g., verified in another tab),
+        // redirect directly to login instead of showing an error.
+        if (err.code === "ALREADY_VERIFIED") {
+          router.replace("/login?verified=1");
+          return;
+        }
         setOtpError(err.message);
       } else {
         setOtpError("Something went wrong. Please try again.");

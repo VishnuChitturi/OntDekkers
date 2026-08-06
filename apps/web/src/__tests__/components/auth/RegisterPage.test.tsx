@@ -255,7 +255,10 @@ describe("RegisterPage — successful registration", () => {
 // ---------------------------------------------------------------------------
 
 describe("RegisterPage — registration failure", () => {
-  it("displays ApiError.message for a 409 duplicate email rejection", async () => {
+  it("redirects to /verify-email for a 409 EMAIL_ALREADY_REGISTERED response", async () => {
+    // New behavior: duplicate registration redirects to verify-email so the
+    // user can complete (or is informed about) the verification flow — no
+    // error banner is shown.
     mockRegister.mockRejectedValue(
       new ApiError(409, {
         success: false,
@@ -271,9 +274,13 @@ describe("RegisterPage — registration failure", () => {
     await user.type(screen.getByLabelText(/confirm password/i), "securepass1");
     await user.click(screen.getByRole("button", { name: /create account/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Email already registered"
-    );
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(
+        `/verify-email?email=${encodeURIComponent("taken@example.com")}`
+      );
+    });
+    // No error banner should be displayed
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("displays the generic fallback for a non-ApiError rejection", async () => {
@@ -291,18 +298,20 @@ describe("RegisterPage — registration failure", () => {
     );
   });
 
-  it("does not navigate to /verify-email after a failed registration", async () => {
+  it("does not navigate after a generic (non-duplicate) registration failure", async () => {
+    // Only EMAIL_ALREADY_REGISTERED triggers a redirect — all other errors
+    // should display an error banner and stay on the register page.
     mockRegister.mockRejectedValue(
-      new ApiError(409, {
+      new ApiError(500, {
         success: false,
-        message: "Email already registered",
-        code: "EMAIL_ALREADY_REGISTERED",
+        message: "Internal server error",
+        code: "INTERNAL_ERROR",
       })
     );
     const user = userEvent.setup();
     render(<RegisterPage />);
 
-    await user.type(screen.getByLabelText(/^email$/i), "taken@example.com");
+    await user.type(screen.getByLabelText(/^email$/i), "user@example.com");
     await user.type(screen.getByLabelText(/^password$/i), "securepass1");
     await user.type(screen.getByLabelText(/confirm password/i), "securepass1");
     await user.click(screen.getByRole("button", { name: /create account/i }));

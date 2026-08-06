@@ -453,13 +453,54 @@ class TestAuthServiceRegister:
         assert token.is_used is False
 
     @pytest.mark.asyncio
-    async def test_register_duplicate_email_raises_conflict(self, db_session):
+    async def test_register_duplicate_unverified_email_resends_otp(self, db_session):
+        """
+        Re-registering with an email that is already registered but NOT yet
+        verified must NOT raise an exception.  It should return a RegisterResponse
+        (so the frontend always reaches the verify-email screen) and the OTP
+        service must have generated a fresh OTP record.
+        """
         from app.services.auth import AuthService
-        from shared.exceptions import ConflictException
+        from app.schemas.auth import RegisterResponse
+        from sqlalchemy import select
+        from app.models.user import EmailVerificationOTP
+
         svc = AuthService(db_session)
-        await svc.register("dup@example.com", "SecurePass1!")
+        first = await svc.register("dup_unverified@example.com", "SecurePass1!")
+        # At this point the user is unverified (is_verified=False).
+
+        # Second registration attempt — should NOT raise, should resend OTP.
+        second = await svc.register("dup_unverified@example.com", "DifferentPass1!")
+        assert isinstance(second, RegisterResponse)
+        assert second.user_id == first.user_id  # same user record
+        assert second.email == first.email
+
+        # A fresh OTP record must exist for the user.
+        rows = await db_session.execute(
+            select(EmailVerificationOTP).where(
+                EmailVerificationOTP.user_id == first.user_id
+            )
+        )
+        record = rows.scalar_one_or_none()
+        assert record is not None
+
+    @pytest.mark.asyncio
+    async def test_register_duplicate_verified_email_raises_conflict(self, db_session):
+        """
+        Re-registering with an email that is already registered AND verified
+        must raise ConflictException with EMAIL_ALREADY_REGISTERED.
+        """
+        from app.services.auth import AuthService
+        from app.repositories.auth import UserRepository
+        from shared.exceptions import ConflictException
+
+        svc = AuthService(db_session)
+        reg = await svc.register("dup_verified@example.com", "SecurePass1!")
+        # Mark the user as verified so the duplicate path returns 409.
+        await UserRepository(db_session).mark_verified(reg.user_id)
+
         with pytest.raises(ConflictException) as exc_info:
-            await svc.register("dup@example.com", "SecurePass1!")
+            await svc.register("dup_verified@example.com", "SecurePass1!")
         assert "EMAIL_ALREADY_REGISTERED" in str(exc_info.value.error_code)
 
 

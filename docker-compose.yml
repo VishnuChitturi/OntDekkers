@@ -133,9 +133,9 @@ services:
       ALLOWED_ORIGINS: '["http://localhost:3000", "http://localhost", "http://127.0.0.1:3000", "http://127.0.0.1"]'
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: 587
-      SMTP_USERNAME: prajwaln0911@gmail.com
-      SMTP_PASSWORD: icwotdwfyjziemxr
-      SMTP_FROM_EMAIL: prajwaln0911@gmail.com
+      SMTP_USERNAME: ontdekkeradmin@gmail.com
+      SMTP_PASSWORD: zcxnopbmklxobdga
+      SMTP_FROM_EMAIL: ontdekkeradmin@gmail.com
       SMTP_FROM_NAME: OntDekker
       SMTP_USE_TLS: "true"
     depends_on:

@@ -63,6 +63,15 @@ export default function RegisterPage() {
       router.push(`/verify-email?email=${encodeURIComponent(email.trim())}`);
     } catch (err) {
       if (err instanceof ApiError) {
+        // EMAIL_ALREADY_REGISTERED with is_verified=false: the backend already
+        // resent the OTP.  Redirect to verification so the user can complete it.
+        // EMAIL_ALREADY_REGISTERED with is_verified=true: the backend still
+        // returns this code — redirect so the user sees a "already verified,
+        // go to login" message rather than a hard stop here.
+        if (err.code === "EMAIL_ALREADY_REGISTERED") {
+          router.push(`/verify-email?email=${encodeURIComponent(email.trim())}`);
+          return;
+        }
         setError(err.message);
       } else {
         setError("Something went wrong. Please try again.");

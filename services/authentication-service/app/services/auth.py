@@ -132,11 +132,58 @@ class AuthService:
         # Step 1: hash password first (outside the transaction flush)
         hashed = get_password_hash(password)
 
-        # Step 2: insert user — IntegrityError if email already exists
+        # Step 2: insert user — IntegrityError if email already exists.
+        # Before attempting the INSERT, check whether the email is already
+        # taken so we can distinguish unverified vs. verified duplicates
+        # without relying on a post-rollback query (which is unreliable
+        # in savepoint-based test sessions).
+        existing_user = await self._users.get_by_email(email)
+
+        if existing_user is not None:
+            if not existing_user.is_verified:
+                # User registered but never verified — treat this as a resend
+                # request.  Generate a fresh OTP (invalidates the old one) and
+                # send it, then return the same RegisterResponse shape so the
+                # frontend always navigates to the verify-email screen.
+                from app.config.settings import settings as _settings
+                raw_otp = await self._otp_service.generate(user_id=existing_user.id)
+
+                logger.info(
+                    "Re-registration for unverified account — OTP resent",
+                    extra={"extra_data": {"user_id": str(existing_user.id), "email": email}},
+                )
+
+                if self._email_service is not None:
+                    await _send_otp_email_safe(
+                        email_service=self._email_service,
+                        email=email,
+                        otp=raw_otp,
+                        expiration_minutes=_settings.OTP_EXPIRE_MINUTES,
+                        context="re-registration",
+                    )
+
+                return RegisterResponse(
+                    message=(
+                        "This email is already registered but not yet verified. "
+                        "A new verification code has been sent to your inbox."
+                    ),
+                    user_id=existing_user.id,
+                    email=existing_user.email,
+                )
+
+            # User is already fully verified — reject with 409.
+            raise ConflictException(
+                message="An account with this email address already exists.",
+                error_code="EMAIL_ALREADY_REGISTERED",
+            )
+
         try:
             user = await self._users.create(email=email, password_hash=hashed)
         except IntegrityError:
-            # The unique constraint on users.email fired.
+            # Extremely unlikely race condition: another request registered
+            # the same email between our SELECT above and this INSERT.
+            # Roll back and return a generic conflict — the user can log in
+            # or retry registration to reach the OTP screen.
             await self._session.rollback()
             raise ConflictException(
                 message="An account with this email address already exists.",
