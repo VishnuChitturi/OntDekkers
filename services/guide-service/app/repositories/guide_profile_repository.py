@@ -96,6 +96,7 @@ class GuideProfileRepository:
                 selectinload(GuideProfile.locations),
                 selectinload(GuideProfile.languages),
                 selectinload(GuideProfile.availability),
+                selectinload(GuideProfile.specializations),
             )
         )
         if not include_deleted:
@@ -145,6 +146,7 @@ class GuideProfileRepository:
                 selectinload(GuideProfile.locations),
                 selectinload(GuideProfile.languages),
                 selectinload(GuideProfile.availability),
+                selectinload(GuideProfile.specializations),
             )
         )
 
@@ -170,6 +172,13 @@ class GuideProfileRepository:
                 GuideAvailability,
                 GuideAvailability.guide_id == GuideProfile.id,
             ).where(GuideAvailability.status == filters.availability)
+
+        if filters.specialization is not None:
+            from app.models.guide_specialization import GuideSpecialization
+            base_stmt = base_stmt.join(
+                GuideSpecialization,
+                GuideSpecialization.guide_id == GuideProfile.id,
+            ).where(GuideSpecialization.category == filters.specialization)
 
         # Distinct to avoid duplicates from multi-value joins
         base_stmt = base_stmt.distinct()

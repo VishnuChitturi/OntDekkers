@@ -19,6 +19,7 @@ import {
   Users,
   MapPin,
   Map,
+  Backpack,
   User,
   Menu,
   X,
@@ -52,8 +53,13 @@ const NAV_ITEMS = [
   },
   {
     label: "Trips",
-    href: "/my-trips",
+    href: "/trips",
     icon: Map,
+  },
+  {
+    label: "My Trips",
+    href: "/my-trips",
+    icon: Backpack,
   },
   {
     label: "Profile",

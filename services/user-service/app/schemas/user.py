@@ -92,6 +92,16 @@ class SaveItemRequest(BaseModel):
         return v
 
 
+class BatchProfilesRequest(BaseModel):
+    """POST /users/batch-profiles — resolve display data for a list of user IDs."""
+    user_ids: List[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="List of user profile IDs to resolve (max 200)",
+    )
+
+
 # ===========================================================================
 # Response Schemas
 # ===========================================================================
@@ -203,6 +213,21 @@ class FollowerSummary(BaseModel):
     display_name: str
     avatar_url: Optional[str] = None
     model_config = {"from_attributes": True}
+
+
+class BatchProfileSummary(BaseModel):
+    """Minimal profile info for a single user — returned by batch-profiles."""
+
+    id: uuid.UUID
+    username: str
+    display_name: str
+    avatar_url: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class BatchProfilesResponse(BaseModel):
+    """Response for POST /users/batch-profiles."""
+    profiles: List[BatchProfileSummary]
 
 
 class PaginatedFollowersResponse(BaseModel):

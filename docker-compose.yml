@@ -101,6 +101,10 @@ services:
       # the signature remains valid when the browser sends the PUT request to
       # localhost:9000.
       MINIO_SERVER_URL: "http://localhost:9000"
+      # Allow browser-originated requests (presigned PUT uploads) from the
+      # Next.js frontend origin.  The browser makes direct PUT requests to MinIO
+      # for community logos and banners — CORS is required for these to succeed.
+      MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:3000,http://localhost"
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -233,11 +237,17 @@ services:
       JWT_ALGORITHM: HS256
       SERVICE_NAME: community-service
       ENVIRONMENT: development
+      # Internal endpoint: used for backend-to-MinIO SDK communication inside Docker
       MINIO_ENDPOINT: minio:9000
+      # Public endpoint: embedded in permanent media URLs returned to the browser.
+      # Must match the host:port the browser can reach (MinIO's port-mapped address).
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
       MINIO_ACCESS_KEY: minioadmin
+      # Must match MINIO_ROOT_PASSWORD set on the minio service above
       MINIO_SECRET_KEY: minioadmin123
       KAFKA_URL: kafka:29092
       REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: '["http://localhost:3000", "http://localhost", "http://127.0.0.1:3000", "http://127.0.0.1"]'
     depends_on:
       postgres:
         condition: service_healthy

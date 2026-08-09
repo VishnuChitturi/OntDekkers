@@ -5,22 +5,24 @@
  *
  * Guide discovery card used in the Guides directory.
  *
- * Information displayed (per 05-component-library.md § Guide Card):
+ * Information displayed:
+ *   - Cover image (top strip)
  *   - Avatar (md)
  *   - Display name + VerificationBadge when VERIFIED
  *   - Star rating (mono) + review count
+ *   - Price per day
  *   - Cities (first 2) + languages (first 2)
+ *   - Specializations (chips)
  *   - Bio excerpt (2-line clamp)
  *
  * Actions:
  *   Bookmark — spring scale 1→1.2→1 (organic spring)
- *   Message  — opens conversation
  *   View Profile — onClick navigates to guide portfolio
  */
 
 import React from "react";
 import { motion } from "motion/react";
-import { Bookmark, Star, MapPin, Languages } from "lucide-react";
+import { Bookmark, Star, MapPin, Languages, DollarSign, Tag } from "lucide-react";
 import Avatar from "@/components/feedback/Avatar";
 import { VerificationBadge } from "@/components/feedback/Badge";
 import Button from "@/components/feedback/Button";
@@ -36,7 +38,7 @@ export default function GuideCard({
   const isVerified = guide.verificationStatus === "VERIFIED";
   const isBookmarked = false; // bookmarked state comes from parent via TravelConnection
 
-  // First 2 cities
+  // First 2 location labels
   const cities = guide.locations
     .slice(0, 2)
     .map((l) => l.city ?? l.region ?? l.country)
@@ -45,6 +47,9 @@ export default function GuideCard({
 
   // First 2 languages
   const langs = guide.languages.slice(0, 2).map((l) => l.language).join(", ");
+
+  // First 3 specialization chips
+  const specs = guide.specializations?.slice(0, 3) ?? [];
 
   return (
     <motion.div
@@ -64,7 +69,7 @@ export default function GuideCard({
               />
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-ink truncate">
-                  {guide.displayName}
+                  {guide.displayName ?? "Guide"}
                 </p>
                 {isVerified && (
                   <VerificationBadge size="sm" className="mt-0.5" />
@@ -100,29 +105,37 @@ export default function GuideCard({
             </motion.button>
           </div>
 
-          {/* Rating row */}
-          {guide.rating !== null && (
-            <div className="flex items-center gap-1.5">
-              <Star
-                size={13}
-                strokeWidth={2}
-                fill="currentColor"
-                className="text-amber-400"
-                aria-hidden="true"
-              />
-              <span className="text-xs font-mono font-medium text-ink">
-                {guide.rating.toFixed(1)}
-              </span>
-              <span className="text-[10px] font-mono text-muted-slate">
-                ({guide.reviewCount} reviews)
-              </span>
-              {guide.yearsExperience !== null && (
-                <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-muted-slate">
-                  {guide.yearsExperience} yrs exp
+          {/* Rating + price row */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {guide.rating !== null && (
+              <>
+                <Star
+                  size={13}
+                  strokeWidth={2}
+                  fill="currentColor"
+                  className="text-amber-400"
+                  aria-hidden="true"
+                />
+                <span className="text-xs font-mono font-medium text-ink">
+                  {guide.rating.toFixed(1)}
                 </span>
-              )}
-            </div>
-          )}
+                <span className="text-[10px] font-mono text-muted-slate">
+                  ({guide.reviewCount})
+                </span>
+              </>
+            )}
+            {guide.yearsExperience !== null && (
+              <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-muted-slate">
+                {guide.yearsExperience} yrs exp
+              </span>
+            )}
+            {guide.pricePerDay !== null && guide.pricePerDay !== undefined && (
+              <span className="ml-auto flex items-center gap-0.5 text-[10px] font-mono font-semibold text-ink">
+                <DollarSign size={9} strokeWidth={2} aria-hidden="true" />
+                {guide.pricePerDay}/day
+              </span>
+            )}
+          </div>
 
           {/* Location + languages metadata */}
           <div className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-wider text-muted-slate">
@@ -139,6 +152,21 @@ export default function GuideCard({
               </span>
             )}
           </div>
+
+          {/* Specialization chips */}
+          {specs.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" aria-label="Specializations">
+              {specs.map((s) => (
+                <span
+                  key={s.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-[10px] font-medium text-charcoal"
+                >
+                  <Tag size={8} strokeWidth={2} aria-hidden="true" />
+                  {s.category}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Bio excerpt */}
           {guide.bio && (

@@ -56,7 +56,9 @@ class CommunityService:
             requires_approval=request.requires_approval,
             created_by=creator_id,
         )
-        await self.session.commit()
+        # NOTE: community_repo.create() already calls session.commit() internally.
+        # Do NOT call session.commit() here — a second commit on a closed
+        # transaction raises sqlalchemy.exc.InvalidRequestError → HTTP 500.
         return await self._to_schema(community, creator_id)
 
     # -------------------------------------------------------------------------
@@ -224,16 +226,32 @@ class CommunityService:
         current_user_id: Optional[uuid.UUID],
     ) -> CommunitySchema:
         """Convert Community ORM model to CommunitySchema with viewer context."""
+        from app.schemas.community import CommunityRuleSchema, MembershipViewStatus
+        from shared.constants.status import JoinRequestStatus
+
         current_user_role = None
         is_member = False
+        membership_status = MembershipViewStatus.NOT_MEMBER
 
         if current_user_id:
             member = await self.membership_repo.get_active_member(community.id, current_user_id)
             if member:
                 is_member = True
                 current_user_role = member.role
+                if member.role == MemberRole.OWNER:
+                    membership_status = MembershipViewStatus.HEAD
+                elif member.role == MemberRole.MODERATOR:
+                    membership_status = MembershipViewStatus.CO_HEAD
+                else:
+                    membership_status = MembershipViewStatus.MEMBER
+            else:
+                # Check for a pending join request
+                pending = await self.membership_repo.get_pending_join_request(
+                    community.id, current_user_id
+                )
+                if pending:
+                    membership_status = MembershipViewStatus.PENDING
 
-        from app.schemas.community import CommunityRuleSchema
         rules = [
             CommunityRuleSchema.model_validate(rule)
             for rule in (community.rules or [])
@@ -256,6 +274,7 @@ class CommunityService:
             rules=rules,
             current_user_role=current_user_role,
             is_member=is_member,
+            membership_status=membership_status,
             created_at=community.created_at,
             updated_at=community.updated_at,
             created_by=community.created_by,

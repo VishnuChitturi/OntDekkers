@@ -1,7 +1,7 @@
-import type { ExpeditionSummary } from "@/types";
+import type { TripSummary } from "@/types/trip";
 
 export interface TripCardProps {
-  trip: ExpeditionSummary;
+  trip: TripSummary;
   onClick: () => void;
   /** Stagger index for view-entry animation */
   index?: number;

@@ -3,16 +3,17 @@
 /**
  * OntDekker TripCard
  *
- * Expedition summary card for the My Trips view.
+ * Displays a trip summary card in the Trips grid.
+ * Data: TripSummary (from /api/v1/trips or /api/v1/users/me/trips)
  *
- * Information displayed (per 05-component-library.md § Trip Card):
+ * Displays:
  *   - Cover image
- *   - Status badge (colour-coded per ExpeditionStatus)
+ *   - Status badge
  *   - Destination + title
- *   - Dates (JetBrains Mono)
- *   - Budget (JetBrains Mono)
- *   - Organiser name
- *   - Participant count / capacity
+ *   - Dates
+ *   - Budget
+ *   - Participants count / max
+ *   - Host name
  */
 
 import React from "react";
@@ -22,10 +23,9 @@ import Badge from "@/components/feedback/Badge";
 import type { BadgeVariant } from "@/components/feedback/Badge";
 import BaseCard from "@/components/cards/BaseCard";
 import type { TripCardProps } from "./TripCard.types";
-import type { ExpeditionStatus } from "@/types";
+import type { TripStatus } from "@/types/trip";
 
-// Status → Badge variant + label
-const STATUS_CONFIG: Record<ExpeditionStatus, { variant: BadgeVariant; label: string }> = {
+const STATUS_CONFIG: Record<TripStatus, { variant: BadgeVariant; label: string }> = {
   DRAFT:      { variant: "default",  label: "Draft" },
   PUBLISHED:  { variant: "info",     label: "Open" },
   ACTIVE:     { variant: "success",  label: "Active" },
@@ -36,12 +36,20 @@ const STATUS_CONFIG: Record<ExpeditionStatus, { variant: BadgeVariant; label: st
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatBudget(budget: number | null): string {
+  if (budget === null || budget === undefined) return "Budget TBD";
+  return `$${Number(budget).toLocaleString()}`;
 }
 
 export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
-  const statusCfg = STATUS_CONFIG[trip.status];
+  const statusCfg = STATUS_CONFIG[trip.status] ?? STATUS_CONFIG.DRAFT;
 
   return (
     <motion.div
@@ -51,7 +59,7 @@ export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
     >
       <BaseCard
         onClick={onClick}
-        ariaLabel={`Open expedition: ${trip.title}`}
+        ariaLabel={`Open trip: ${trip.title}`}
         className="p-0 overflow-hidden space-y-0"
       >
         {/* Cover image */}
@@ -69,7 +77,6 @@ export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
               <MapPin size={24} strokeWidth={1.5} className="text-gray-300" aria-hidden="true" />
             </div>
           )}
-          {/* Status badge overlay */}
           <div className="absolute top-3 right-3">
             <Badge variant={statusCfg.variant} size="sm">
               {statusCfg.label}
@@ -79,7 +86,7 @@ export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
 
         {/* Content */}
         <div className="p-4 space-y-3">
-          {/* Destination */}
+          {/* Destination + title */}
           <div>
             <p className="text-[10px] font-mono uppercase tracking-wider text-muted-slate">
               {trip.destination}
@@ -94,31 +101,29 @@ export default function TripCard({ trip, onClick, index = 0 }: TripCardProps) {
             {/* Dates */}
             <span className="flex items-center gap-1">
               <CalendarDays size={10} strokeWidth={2} aria-hidden="true" />
-              <span>{formatDate(trip.startDate)}</span>
+              <span>{trip.startDate ? formatDate(trip.startDate) : "Date TBD"}</span>
             </span>
 
             {/* Budget */}
             <span className="flex items-center gap-1">
               <Wallet size={10} strokeWidth={2} aria-hidden="true" />
-              <span className="uppercase tracking-wider">
-                {trip.status === "DRAFT" ? "Budget TBD" : "Open"}
-              </span>
+              <span>{formatBudget(trip.budget)}</span>
             </span>
 
             {/* Participants */}
             <span className="flex items-center gap-1 col-span-2">
               <Users size={10} strokeWidth={2} aria-hidden="true" />
               <span>
-                {trip.currentParticipantsCount ?? "—"} / {trip.maxParticipants} participants
+                {trip.currentParticipantsCount} / {trip.maxParticipants} participants
               </span>
             </span>
           </div>
 
-          {/* Organiser */}
-          {trip.organizerName && (
+          {/* Host name */}
+          {trip.hostName && (
             <p className="text-xs text-charcoal">
-              <span className="text-muted-slate">by </span>
-              {trip.organizerName}
+              <span className="text-muted-slate">hosted by </span>
+              {trip.hostName}
             </p>
           )}
         </div>

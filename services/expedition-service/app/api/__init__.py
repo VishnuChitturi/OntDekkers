@@ -15,6 +15,7 @@ from app.api.v1.itinerary import router as itinerary_router
 from app.api.v1.gallery import router as gallery_router
 from app.api.v1.gear import router as gear_router
 from app.api.v1.reviews import router as reviews_router
+from app.api.v1.trips import router as trips_router  # MCP-1: trip-centric endpoints
 
 # Single router that main.py includes — keeps main.py clean
 router = APIRouter()
@@ -26,3 +27,4 @@ router.include_router(itinerary_router)
 router.include_router(gallery_router)
 router.include_router(gear_router)
 router.include_router(reviews_router)
+router.include_router(trips_router)

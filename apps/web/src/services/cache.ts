@@ -15,3 +15,4 @@ export { guideKeys } from "./cache/guideCache";
 export { expeditionKeys } from "./cache/expeditionCache";
 export { communityKeys } from "./cache/communityCache";
 export { feedKeys } from "./cache/feedCache";
+export { tripKeys } from "./cache/tripCache";

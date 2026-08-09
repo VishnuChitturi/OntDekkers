@@ -18,6 +18,7 @@ from app.models.guide_language import GuideLanguage
 from app.models.guide_availability import GuideAvailability, AvailabilityStatus
 from app.models.guide_review import GuideReview
 from app.models.travel_connection import TravelConnection
+from app.models.guide_specialization import GuideSpecialization
 
 __all__ = [
     # Root aggregate
@@ -31,6 +32,7 @@ __all__ = [
     # Profile children
     "GuideLocation",
     "GuideLanguage",
+    "GuideSpecialization",
 
     # Availability
     "GuideAvailability",

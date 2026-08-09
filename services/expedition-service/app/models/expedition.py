@@ -98,12 +98,13 @@ class Expedition(Base, AuditMixin, SoftDeleteMixin):
     # ------------------------------------------------------------------
     # External service references (UUIDs only, no SQL foreign keys)
     # community_id → Community Service (community_db) — not a FK
+    #               nullable: personal trips have no community
     # organizer_id → User/Auth Service (user_db / auth_db) — not a FK
     # ------------------------------------------------------------------
-    community_id: Mapped[uuid.UUID] = mapped_column(
+    community_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        nullable=False,
-        comment="UUID reference to community_db.communities. NOT a SQL FK.",
+        nullable=True,
+        comment="UUID reference to community_db.communities. NOT a SQL FK. NULL for personal trips.",
     )
     organizer_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

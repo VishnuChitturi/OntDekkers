@@ -8,6 +8,7 @@ Handles validation, serialization, and documentation.
 import re
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
@@ -18,6 +19,24 @@ from shared.constants.status import (
     MembershipStatus,
     JoinRequestStatus,
 )
+
+
+# ---------------------------------------------------------------------------
+# Viewer membership status — single enum that powers all UI states
+# ---------------------------------------------------------------------------
+
+class MembershipViewStatus(str, Enum):
+    """
+    Represents the current authenticated user's relationship with a community.
+    Returned as `membership_status` on CommunitySchema so the frontend can
+    derive all join-button and permission UI from a single authoritative field
+    without relying on ephemeral local state.
+    """
+    NOT_MEMBER = "NOT_MEMBER"
+    PENDING    = "PENDING"     # has a pending join request
+    MEMBER     = "MEMBER"      # active member (MEMBER role)
+    CO_HEAD    = "CO_HEAD"     # MODERATOR role
+    HEAD       = "HEAD"        # OWNER role
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +119,10 @@ class CommunitySchema(AuditSchema):
         None, description="Current user's role in this community (None if not a member)"
     )
     is_member: bool = Field(default=False)
+    membership_status: MembershipViewStatus = Field(
+        default=MembershipViewStatus.NOT_MEMBER,
+        description="Current user's relationship with this community",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

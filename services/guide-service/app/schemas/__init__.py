@@ -46,6 +46,11 @@ from app.schemas.travel_connection import (
     TravelConnectionListResponse,
 )
 
+from app.schemas.guide_specialization import (
+    GuideSpecializationCreate,
+    GuideSpecializationResponse,
+)
+
 __all__ = [
     # Common
     "PaginationMeta",
@@ -84,4 +89,8 @@ __all__ = [
     # Travel connections
     "TravelConnectionResponse",
     "TravelConnectionListResponse",
+
+    # Specializations
+    "GuideSpecializationCreate",
+    "GuideSpecializationResponse",
 ]

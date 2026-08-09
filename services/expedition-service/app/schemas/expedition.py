@@ -131,10 +131,10 @@ class ExpeditionCreate(ExpeditionBase):
         max_length=200,
         description="Primary destination name.",
     )
-    community_id: UUID = Field(
-        ...,
+    community_id: Optional[UUID] = Field(
+        default=None,
         description="UUID of the community this expedition belongs to. "
-                    "Must be a community the organiser is a member of.",
+                    "Omit for personal (non-community) trips.",
     )
 
     # Provide sensible defaults for optional numeric fields at creation time
@@ -207,7 +207,7 @@ class ExpeditionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    community_id: UUID
+    community_id: Optional[UUID]
     organizer_id: UUID
 
     title: str
@@ -250,7 +250,7 @@ class ExpeditionSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    community_id: UUID
+    community_id: Optional[UUID]
     organizer_id: UUID
 
     title: str

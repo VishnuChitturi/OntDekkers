@@ -9,42 +9,90 @@
  *
  * All paths are relative to the Traefik gateway base URL configured
  * in axios.ts (NEXT_PUBLIC_API_BASE_URL).
+ *
+ * NOTE ON RESPONSE SHAPES
+ * The Community Service uses its own pagination envelope:
+ *   { communities: [...], total, limit, offset, has_more }
+ * This differs from the generic PaginatedResponse<T> used elsewhere.
+ * getCommunities() normalises the shape so callers see a consistent
+ * CommunitiesPage type (defined below).
+ *
+ * NOTE ON MEDIA UPLOADS
+ * Community images are uploaded using a 2-step presigned URL flow:
+ *   1. POST /{id}/logo/upload-url  →  { upload_url, object_key, expires_in }
+ *   2. PUT binary to `upload_url`  (directly to MinIO, no auth header)
+ *   3. PUT /{id}/logo with { object_key } to persist
+ * Same flow applies for banners via /{id}/banner/upload-url and /{id}/banner.
  */
 
 import apiClient from "./axios";
 import type {
-  PaginatedResponse,
   Community,
   CommunitySummary,
-  CommunityMember,
-  JoinRequest,
-  Discussion,
-  DiscussionSummary,
-  DiscussionComment,
-  CommunityRule,
   CreateCommunityRequest,
   UpdateCommunityRequest,
-  CreateDiscussionRequest,
-  CreateDiscussionCommentRequest,
-  JoinRequestPayload,
   CommunityFilter,
-  DiscussionFilter,
-  CommunityMediaUploadRequest,
-  CommunityMediaUploadResponse,
+  CommunityMember,
+  MemberListResponse,
+  JoinResult,
+  CommunityJoinRequest,
+  JoinRequestListResponse,
+  JoinRequestActionRequest,
+  MemberRoleUpdateRequest,
 } from "@/types";
+
+// ---------------------------------------------------------------------------
+// Community-specific pagination response
+// (Backend envelope differs from the generic PaginatedResponse<T>)
+// ---------------------------------------------------------------------------
+
+export interface CommunitiesPage {
+  communities: CommunitySummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Media upload types (matching backend MediaUploadRequest / MediaUploadResponse)
+// ---------------------------------------------------------------------------
+
+export interface CommunityUploadUrlRequest {
+  /** Original filename — used to extract the file extension on the server */
+  filename: string;
+  /** MIME type, e.g. "image/jpeg" */
+  content_type: string;
+}
+
+export interface CommunityUploadUrlResponse {
+  /** Presigned PUT URL to upload the binary directly to MinIO */
+  uploadUrl: string;
+  /** Object key to pass back to the backend after upload */
+  objectKey: string;
+  /** Seconds until the presigned URL expires (typically 3600) */
+  expiresIn: number;
+}
 
 // ---------------------------------------------------------------------------
 // Communities
 // ---------------------------------------------------------------------------
 
-/** Fetch paginated community directory */
+/**
+ * Fetch paginated community directory.
+ *
+ * Query params supported by the backend:
+ *   limit, offset, search, location, visibility
+ */
 export async function getCommunities(
   filters: Partial<CommunityFilter> = {},
-): Promise<PaginatedResponse<CommunitySummary>> {
+): Promise<CommunitiesPage> {
   const { data } = await apiClient.get("/communities/api/v1/communities", {
     params: filters,
   });
-  return data;
+  // The axios response interceptor converts snake_case → camelCase so
+  // has_more → hasMore already.  We return the data directly.
+  return data as CommunitiesPage;
 }
 
 /** Fetch a single community's full detail */
@@ -54,10 +102,10 @@ export async function getCommunityById(
   const { data } = await apiClient.get(
     `/communities/api/v1/communities/${communityId}`,
   );
-  return data;
+  return data as Community;
 }
 
-/** Create a new community */
+/** Create a new community. Returns the newly created community. */
 export async function createCommunity(
   payload: CreateCommunityRequest,
 ): Promise<Community> {
@@ -65,7 +113,7 @@ export async function createCommunity(
     "/communities/api/v1/communities",
     payload,
   );
-  return data;
+  return data as Community;
 }
 
 /** Update an existing community */
@@ -77,7 +125,7 @@ export async function updateCommunity(
     `/communities/api/v1/communities/${communityId}`,
     payload,
   );
-  return data;
+  return data as Community;
 }
 
 /** Archive (soft-delete) a community */
@@ -86,56 +134,208 @@ export async function archiveCommunity(communityId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Community media uploads
+// Community media — presigned URL generation + persistence
 // ---------------------------------------------------------------------------
 
-/** Request a pre-signed upload URL for a community banner or logo */
-export async function requestCommunityMediaUploadUrl(
-  payload: CommunityMediaUploadRequest,
-): Promise<CommunityMediaUploadResponse> {
+/**
+ * Step 1a — Request a presigned PUT URL for a community LOGO.
+ * POST /communities/api/v1/communities/{id}/logo/upload-url
+ *
+ * OWNER only. Call AFTER the community has been created.
+ */
+export async function getLogoUploadUrl(
+  communityId: string,
+  request: CommunityUploadUrlRequest,
+): Promise<CommunityUploadUrlResponse> {
   const { data } = await apiClient.post(
-    "/communities/api/v1/communities/media/upload-url",
-    payload,
+    `/communities/api/v1/communities/${communityId}/logo/upload-url`,
+    request,
   );
-  return data;
+  return data as CommunityUploadUrlResponse;
+}
+
+/**
+ * Step 2a — Upload the logo binary directly to MinIO.
+ * PUT <presignedUrl>  (no Authorization header — MinIO validates via query params)
+ */
+export async function uploadLogoToStorage(
+  presignedUrl: string,
+  file: File,
+): Promise<void> {
+  const response = await fetch(presignedUrl, {
+    method: "PUT",
+    body: file,
+    headers: {
+      "Content-Type": file.type,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to upload logo to storage (HTTP ${response.status}). Check that MinIO is running and accessible on port 9000.`,
+    );
+  }
+}
+
+/**
+ * Step 3a — Persist the logo object key so the backend stores the URL.
+ * PUT /communities/api/v1/communities/{id}/logo
+ */
+export async function persistCommunityLogo(
+  communityId: string,
+  objectKey: string,
+): Promise<Community> {
+  const { data } = await apiClient.put(
+    `/communities/api/v1/communities/${communityId}/logo`,
+    { object_key: objectKey },
+  );
+  return data as Community;
+}
+
+/**
+ * Step 1b — Request a presigned PUT URL for a community BANNER.
+ * POST /communities/api/v1/communities/{id}/banner/upload-url
+ *
+ * OWNER only. Call AFTER the community has been created.
+ */
+export async function getBannerUploadUrl(
+  communityId: string,
+  request: CommunityUploadUrlRequest,
+): Promise<CommunityUploadUrlResponse> {
+  const { data } = await apiClient.post(
+    `/communities/api/v1/communities/${communityId}/banner/upload-url`,
+    request,
+  );
+  return data as CommunityUploadUrlResponse;
+}
+
+/**
+ * Step 2b — Upload the banner binary directly to MinIO.
+ */
+export async function uploadBannerToStorage(
+  presignedUrl: string,
+  file: File,
+): Promise<void> {
+  const response = await fetch(presignedUrl, {
+    method: "PUT",
+    body: file,
+    headers: {
+      "Content-Type": file.type,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to upload banner to storage (HTTP ${response.status}). Check that MinIO is running and accessible on port 9000.`,
+    );
+  }
+}
+
+/**
+ * Step 3b — Persist the banner object key so the backend stores the URL.
+ * PUT /communities/api/v1/communities/{id}/banner
+ */
+export async function persistCommunityBanner(
+  communityId: string,
+  objectKey: string,
+): Promise<Community> {
+  const { data } = await apiClient.put(
+    `/communities/api/v1/communities/${communityId}/banner`,
+    { object_key: objectKey },
+  );
+  return data as Community;
+}
+
+/**
+ * High-level helper: upload a logo through the full 3-step flow.
+ * Returns the updated Community after persistence.
+ */
+export async function uploadCommunityLogo(
+  communityId: string,
+  file: File,
+): Promise<Community> {
+  const { uploadUrl, objectKey } = await getLogoUploadUrl(communityId, {
+    filename: file.name,
+    content_type: file.type,
+  });
+  await uploadLogoToStorage(uploadUrl, file);
+  return persistCommunityLogo(communityId, objectKey);
+}
+
+/**
+ * High-level helper: upload a banner through the full 3-step flow.
+ * Returns the updated Community after persistence.
+ */
+export async function uploadCommunityBanner(
+  communityId: string,
+  file: File,
+): Promise<Community> {
+  const { uploadUrl, objectKey } = await getBannerUploadUrl(communityId, {
+    filename: file.name,
+    content_type: file.type,
+  });
+  await uploadBannerToStorage(uploadUrl, file);
+  return persistCommunityBanner(communityId, objectKey);
 }
 
 // ---------------------------------------------------------------------------
 // Membership
 // ---------------------------------------------------------------------------
 
-/** Join a public community or submit a join request for a private community */
+/**
+ * Join a community.
+ *
+ * - Public community (requires_approval=false): immediately returns { joined: true }
+ * - Private or approval-required: creates a join request and returns
+ *   { requested: true, requestId: UUID }
+ *
+ * POST /{id}/join
+ */
 export async function joinCommunity(
   communityId: string,
-  payload: JoinRequestPayload = {},
-): Promise<void> {
-  await apiClient.post(
+  payload: { message?: string | null } = {},
+): Promise<JoinResult> {
+  const { data } = await apiClient.post<JoinResult>(
     `/communities/api/v1/communities/${communityId}/join`,
     payload,
   );
+  return data;
 }
 
-/** Leave a community */
+/**
+ * Leave a community.
+ * The OWNER (Head) cannot leave — backend returns 400 with validation error.
+ *
+ * DELETE /{id}/leave
+ */
 export async function leaveCommunity(communityId: string): Promise<void> {
   await apiClient.delete(
     `/communities/api/v1/communities/${communityId}/leave`,
   );
 }
 
-/** Fetch paginated member list for a community */
-export async function getCommunityMembers(
+/**
+ * List the active members of a community.
+ * Private communities: only members can see the list (403 otherwise).
+ *
+ * GET /{id}/members?limit=&offset=&role=
+ */
+export async function listMembers(
   communityId: string,
-  params: { page?: number; page_size?: number } = {},
-): Promise<PaginatedResponse<CommunityMember>> {
-  const { data } = await apiClient.get(
+  params: { limit?: number; offset?: number; role?: string } = {},
+): Promise<MemberListResponse> {
+  const { data } = await apiClient.get<MemberListResponse>(
     `/communities/api/v1/communities/${communityId}/members`,
     { params },
   );
   return data;
 }
 
-/** Remove a member from a community (moderator/owner action) */
-export async function removeCommunityMember(
+/**
+ * Remove a member from the community.
+ * MOD or OWNER only. MODs cannot remove other MODs or the OWNER.
+ *
+ * DELETE /{id}/members/{userId}
+ */
+export async function removeMember(
   communityId: string,
   userId: string,
 ): Promise<void> {
@@ -144,154 +344,66 @@ export async function removeCommunityMember(
   );
 }
 
-/** Promote a member to moderator */
-export async function promoteMember(
+/**
+ * Update a member's role.
+ * OWNER only. Cannot assign OWNER role via this endpoint.
+ *
+ * PUT /{id}/members/{userId}/role
+ */
+export async function updateMemberRole(
   communityId: string,
   userId: string,
+  request: MemberRoleUpdateRequest,
 ): Promise<CommunityMember> {
-  const { data } = await apiClient.post(
-    `/communities/api/v1/communities/${communityId}/members/${userId}/promote`,
+  const { data } = await apiClient.put<CommunityMember>(
+    `/communities/api/v1/communities/${communityId}/members/${userId}/role`,
+    request,
   );
   return data;
 }
 
-/** Demote a moderator back to member */
-export async function demoteModerator(
+/**
+ * List pending join requests.
+ * MOD or OWNER only.
+ *
+ * GET /{id}/join-requests?limit=&offset=
+ */
+export async function listJoinRequests(
   communityId: string,
-  userId: string,
-): Promise<CommunityMember> {
-  const { data } = await apiClient.post(
-    `/communities/api/v1/communities/${communityId}/members/${userId}/demote`,
-  );
-  return data;
-}
-
-// ---------------------------------------------------------------------------
-// Join requests (private communities)
-// ---------------------------------------------------------------------------
-
-/** Fetch pending join requests for a community (owner/moderator action) */
-export async function getJoinRequests(
-  communityId: string,
-  params: { page?: number; page_size?: number } = {},
-): Promise<PaginatedResponse<JoinRequest>> {
-  const { data } = await apiClient.get(
+  params: { limit?: number; offset?: number } = {},
+): Promise<JoinRequestListResponse> {
+  const { data } = await apiClient.get<JoinRequestListResponse>(
     `/communities/api/v1/communities/${communityId}/join-requests`,
     { params },
   );
   return data;
 }
 
-/** Approve a join request */
-export async function approveJoinRequest(
-  communityId: string,
+/**
+ * Approve or reject a join request.
+ * MOD or OWNER only.
+ *
+ * PUT /join-requests/{requestId}
+ */
+export async function actionJoinRequest(
   requestId: string,
-): Promise<void> {
-  await apiClient.post(
-    `/communities/api/v1/communities/${communityId}/join-requests/${requestId}/approve`,
-  );
-}
-
-/** Reject a join request */
-export async function rejectJoinRequest(
-  communityId: string,
-  requestId: string,
-): Promise<void> {
-  await apiClient.post(
-    `/communities/api/v1/communities/${communityId}/join-requests/${requestId}/reject`,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Community rules
-// ---------------------------------------------------------------------------
-
-/** Fetch all rules for a community */
-export async function getCommunityRules(
-  communityId: string,
-): Promise<CommunityRule[]> {
-  const { data } = await apiClient.get(
-    `/communities/api/v1/communities/${communityId}/rules`,
+  request: JoinRequestActionRequest,
+): Promise<CommunityJoinRequest> {
+  const { data } = await apiClient.put<CommunityJoinRequest>(
+    `/communities/api/v1/communities/join-requests/${requestId}`,
+    request,
   );
   return data;
 }
 
-// ---------------------------------------------------------------------------
-// Discussions
-// ---------------------------------------------------------------------------
-
-/** Fetch paginated discussions for a community */
-export async function getCommunityDiscussions(
-  communityId: string,
-  filters: Partial<DiscussionFilter> = {},
-): Promise<PaginatedResponse<DiscussionSummary>> {
-  const { data } = await apiClient.get(
-    `/communities/api/v1/communities/${communityId}/discussions`,
-    { params: filters },
-  );
-  return data;
-}
-
-/** Fetch a single discussion's full detail */
-export async function getDiscussionById(
-  discussionId: string,
-): Promise<Discussion> {
-  const { data } = await apiClient.get(
-    `/communities/api/v1/discussions/${discussionId}`,
-  );
-  return data;
-}
-
-/** Create a new discussion inside a community */
-export async function createDiscussion(
-  communityId: string,
-  payload: CreateDiscussionRequest,
-): Promise<Discussion> {
-  const { data } = await apiClient.post(
-    `/communities/api/v1/communities/${communityId}/discussions`,
-    payload,
-  );
-  return data;
-}
-
-/** Delete a discussion */
-export async function deleteDiscussion(discussionId: string): Promise<void> {
-  await apiClient.delete(`/communities/api/v1/discussions/${discussionId}`);
-}
-
-// ---------------------------------------------------------------------------
-// Discussion comments
-// ---------------------------------------------------------------------------
-
-/** Fetch paginated comments for a discussion */
-export async function getDiscussionComments(
-  discussionId: string,
-  params: { page?: number; page_size?: number } = {},
-): Promise<PaginatedResponse<DiscussionComment>> {
-  const { data } = await apiClient.get(
-    `/communities/api/v1/discussions/${discussionId}/comments`,
-    { params },
-  );
-  return data;
-}
-
-/** Post a comment on a discussion */
-export async function createDiscussionComment(
-  discussionId: string,
-  payload: CreateDiscussionCommentRequest,
-): Promise<DiscussionComment> {
-  const { data } = await apiClient.post(
-    `/communities/api/v1/discussions/${discussionId}/comments`,
-    payload,
-  );
-  return data;
-}
-
-/** Delete a discussion comment */
-export async function deleteDiscussionComment(
-  commentId: string,
-): Promise<void> {
+/**
+ * Cancel the authenticated user's own pending join request.
+ * Only the original requester can cancel.
+ *
+ * DELETE /join-requests/{requestId}/cancel
+ */
+export async function cancelJoinRequest(requestId: string): Promise<void> {
   await apiClient.delete(
-    `/communities/api/v1/discussions/comments/${commentId}`,
+    `/communities/api/v1/communities/join-requests/${requestId}/cancel`,
   );
 }

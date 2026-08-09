@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from app.models.guide_availability import GuideAvailability
     from app.models.guide_review import GuideReview
     from app.models.travel_connection import TravelConnection
+    from app.models.guide_specialization import GuideSpecialization
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +113,15 @@ class GuideProfile(Base, AuditMixin, SoftDeleteMixin):
     )
 
     # ------------------------------------------------------------------
+    # Pricing
+    # ------------------------------------------------------------------
+    price_per_day: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Guide's daily rate in USD. Nullable until set by guide.",
+    )
+
+    # ------------------------------------------------------------------
     # Aggregate stats (denormalised for read performance)
     # ------------------------------------------------------------------
     rating: Mapped[Optional[Decimal]] = mapped_column(
@@ -170,6 +180,12 @@ class GuideProfile(Base, AuditMixin, SoftDeleteMixin):
         cascade="all, delete-orphan",
         lazy="select",
     )
+    specializations: Mapped[List["GuideSpecialization"]] = relationship(
+        "GuideSpecialization",
+        back_populates="guide",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     # ------------------------------------------------------------------
     # Constraints and indexes
@@ -178,6 +194,10 @@ class GuideProfile(Base, AuditMixin, SoftDeleteMixin):
         CheckConstraint(
             "years_experience IS NULL OR years_experience >= 0",
             name="ck_guide_profile_years_experience_non_negative",
+        ),
+        CheckConstraint(
+            "price_per_day IS NULL OR price_per_day >= 0",
+            name="ck_guide_profile_price_non_negative",
         ),
         CheckConstraint(
             "rating IS NULL OR (rating >= 1.00 AND rating <= 5.00)",

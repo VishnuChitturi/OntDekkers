@@ -11,6 +11,7 @@
  *   - Member count (mono)
  *   - Visibility badge (PUBLIC / PRIVATE)
  *   - Location (if available, mono uppercase)
+ *   - Logo / profile photo (if available)
  *
  * Action:
  *   View — onClick navigates to /communities/[id]
@@ -42,31 +43,37 @@ export default function CommunityCard({
         ariaLabel={`View ${community.name} community`}
       >
         <div className="space-y-4">
-          {/* Top row: name + visibility badge */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-ink truncate">
-                {community.name}
-              </p>
-              {community.category && (
-                <p className="text-[10px] font-mono uppercase tracking-wider text-muted-slate mt-0.5">
-                  {community.category}
-                </p>
-              )}
+          {/* Top row: monogram + name + visibility badge */}
+          <div className="flex items-start gap-3">
+            {/* Name monogram — replaces the removed logo avatar */}
+            <div
+              className="w-10 h-10 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center flex-shrink-0 border border-gray-100"
+              aria-hidden="true"
+            >
+              <span className="text-sm font-bold text-gray-500 leading-none">
+                {community.name.slice(0, 1).toUpperCase()}
+              </span>
             </div>
 
-            <Badge
-              variant={isPrivate ? "warning" : "success"}
-              size="sm"
-              className="flex-shrink-0"
-            >
-              {isPrivate ? (
-                <Lock size={9} strokeWidth={2.5} aria-hidden="true" />
-              ) : (
-                <Globe size={9} strokeWidth={2.5} aria-hidden="true" />
-              )}
-              {isPrivate ? "Private" : "Public"}
-            </Badge>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-semibold text-ink truncate">
+                  {community.name}
+                </p>
+                <Badge
+                  variant={isPrivate ? "warning" : "success"}
+                  size="sm"
+                  className="flex-shrink-0"
+                >
+                  {isPrivate ? (
+                    <Lock size={9} strokeWidth={2.5} aria-hidden="true" />
+                  ) : (
+                    <Globe size={9} strokeWidth={2.5} aria-hidden="true" />
+                  )}
+                  {isPrivate ? "Private" : "Public"}
+                </Badge>
+              </div>
+            </div>
           </div>
 
           {/* Description */}

@@ -13,7 +13,6 @@
  * Motion: opacity pulse 0.4→0.8→0.4 at 1.5s (same as GuideCardSkeleton)
  */
 
-import React from "react";
 import { motion } from "motion/react";
 
 function SkeletonCommunityCard() {

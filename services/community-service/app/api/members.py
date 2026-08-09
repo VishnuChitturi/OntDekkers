@@ -184,3 +184,24 @@ async def action_join_request(
         raise HTTPException(status_code=403, detail=str(e))
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/join-requests/{request_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_join_request(
+    request_id: uuid.UUID,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Cancel your own pending join request.
+    Only the original requester can cancel.  Returns 204 on success.
+    """
+    service = MembershipService(db)
+    try:
+        await service.cancel_join_request(request_id, _user_id(current_user))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -29,6 +29,7 @@ from app.repositories.itinerary_repository import ItineraryRepository
 from app.repositories.join_request_repository import JoinRequestRepository
 from app.repositories.participant_repository import ParticipantRepository
 from app.repositories.review_repository import ReviewRepository
+from app.repositories.trip_repository import TripRepository  # MCP-1
 
 from app.services.expedition_service import ExpeditionService
 from app.services.gallery_service import GalleryService
@@ -37,6 +38,7 @@ from app.services.itinerary_service import ItineraryService
 from app.services.join_request_service import JoinRequestService
 from app.services.participant_service import ParticipantService
 from app.services.review_service import ReviewService
+from app.services.trip_service import TripService  # MCP-1
 
 
 # ---------------------------------------------------------------------------
@@ -141,3 +143,20 @@ def get_review_service(
     participant_repo: ParticipantRepository = Depends(get_participant_repository),
 ) -> ReviewService:
     return ReviewService(expedition_repo, review_repo, participant_repo)
+
+
+# ---------------------------------------------------------------------------
+# MCP-1: Trip service factories
+# ---------------------------------------------------------------------------
+
+def get_trip_repository(
+    session: AsyncSession = Depends(get_db),
+) -> TripRepository:
+    return TripRepository(session)
+
+
+def get_trip_service(
+    trip_repo: TripRepository = Depends(get_trip_repository),
+    participant_repo: ParticipantRepository = Depends(get_participant_repository),
+) -> TripService:
+    return TripService(trip_repo, participant_repo)

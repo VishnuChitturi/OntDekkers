@@ -149,6 +149,36 @@ async def transition_verification(
 
 
 # ---------------------------------------------------------------------------
+# POST /api/v1/guides/{guide_id}/verify — admin: verify a guide (convenience)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/{guide_id}/verify",
+    response_model=ApiResponse[GuideProfileResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Verify a guide (admin shortcut)",
+    description=(
+        "Admin-only convenience endpoint. "
+        "Transitions the guide's verification_status from PENDING → VERIFIED. "
+        "Equivalent to PATCH /verification with new_status=VERIFIED."
+    ),
+)
+async def verify_guide(
+    guide_id: UUID,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    service: GuideProfileService = Depends(get_guide_profile_service),
+) -> ApiResponse[GuideProfileResponse]:
+    admin_id = UUID(current_user["sub"])
+    profile = await service.transition_verification_status(
+        guide_id, VerificationStatus.VERIFIED, admin_id
+    )
+    return ApiResponse[GuideProfileResponse](
+        message="Guide verified successfully.",
+        data=profile,
+    )
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/v1/guides/{guide_id} — soft-delete own profile
 # ---------------------------------------------------------------------------
 

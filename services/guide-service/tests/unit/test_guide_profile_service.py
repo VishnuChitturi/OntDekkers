@@ -34,10 +34,12 @@ def _make_profile(
     p = MagicMock()
     p.id = uuid.uuid4()
     p.user_id = user_id or uuid.uuid4()
+    p.display_name = None
     p.bio = "A great guide"
     p.profile_image_url = None
     p.cover_image_url = None
     p.years_experience = 5
+    p.price_per_day = None
     p.rating = Decimal("4.50")
     p.review_count = 10
     p.verification_status = verification_status
@@ -51,6 +53,7 @@ def _make_profile(
     p.locations = []
     p.languages = []
     p.availability = None
+    p.specializations = []
     return p
 
 

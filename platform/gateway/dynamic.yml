@@ -62,6 +62,24 @@ http:
       rule: "PathPrefix(`/api/v1/communities`)"
       service: community-service
 
+    expedition-service-legacy:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/expeditions/api`)"
+      service: expedition-service
+
+    expedition-service-trips:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/v1/trips`)"
+      service: expedition-service
+
+    expedition-service-mytrips:
+      entryPoints:
+        - web
+      rule: "Path(`/api/v1/users/me/trips`)"
+      service: expedition-service
+
   # ── Middlewares ────────────────────────────────────────────────────────────
   middlewares:
 
@@ -105,3 +123,8 @@ http:
           # Traefik reaches community-service over the shared Compose network.
           # Port 8000 is the uvicorn port declared in the service's Dockerfile CMD.
           - url: "http://community-service:8000"
+
+    expedition-service:
+      loadBalancer:
+        servers:
+          - url: "http://expedition-service:8000"

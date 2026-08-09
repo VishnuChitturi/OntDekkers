@@ -23,18 +23,26 @@ export type ApplicationStatus =
 export interface GuideProfile {
   id: UUID;
   userId: UUID;
+  /**
+   * Human-readable display name from the user record.
+   * Populated when user-service integration is available; null until then.
+   * Matches backend field display_name (camelCased by axios interceptor).
+   */
+  displayName?: string | null;
   /** Populated when user-service integration is available; null until then */
   user?: UserSummary | null;
   bio: string | null;
   profileImageUrl: string | null;
   coverImageUrl: string | null;
   yearsExperience: number | null;
+  pricePerDay: number | null;
   rating: number | null;
   reviewCount: number;
   verificationStatus: VerificationStatus;
   locations: GuideLocation[];
   languages: GuideLanguage[];
   availability: GuideAvailability | null;
+  specializations: GuideSpecialization[];
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
@@ -49,10 +57,12 @@ export interface GuideProfileSummary {
   reviewCount: number;
   verificationStatus: VerificationStatus;
   yearsExperience: number | null;
+  pricePerDay: number | null;
   bio: string | null;
   locations: GuideLocation[];
   languages: GuideLanguage[];
   availability: GuideAvailability | null;
+  specializations: GuideSpecialization[];
 }
 
 export interface GuideLocation {
@@ -69,6 +79,12 @@ export interface GuideLanguage {
   language: string;
 }
 
+export interface GuideSpecialization {
+  id: UUID;
+  guideId: UUID;
+  category: string;
+}
+
 export interface GuideAvailability {
   guideId: UUID;
   status: AvailabilityStatus;
@@ -79,7 +95,12 @@ export interface GuideReview {
   id: UUID;
   guideId: UUID;
   reviewerId: UUID;
-  reviewer: UserSummary;
+  /**
+   * Populated only when user-service integration is available.
+   * The guide-service currently returns reviewer_id only — no nested user object.
+   * Code must treat this as optional and fall back to reviewer_id.
+   */
+  reviewer?: UserSummary | null;
   expeditionId: UUID | null;
   ratingOverall: number;
   ratingKnowledge: number;
@@ -90,6 +111,22 @@ export interface GuideReview {
   wouldRecommend: boolean;
   comment: string | null;
   createdAt: ISODateString;
+  updatedAt?: ISODateString;
+}
+
+/**
+ * Paginated list response for guide reviews.
+ * Matches the backend GuideReviewListResponse schema:
+ * { guide_id, items, pagination }
+ *
+ * Structurally compatible with PaginatedResponse<GuideReview> — same
+ * .items and .pagination fields — so existing `data?.items ?? []`
+ * patterns work without change.
+ */
+export interface GuideReviewListResponse {
+  guideId: UUID;
+  items: GuideReview[];
+  pagination: import("./apiTypes").PaginationMeta;
 }
 
 export interface GuideRatingSummary {
@@ -119,6 +156,37 @@ export interface TravelConnection {
 }
 
 // ---------------------------------------------------------------------------
+// Guide application
+// ---------------------------------------------------------------------------
+
+export interface GuideApplicationCreate {
+  biography: string;
+  areas_covered?: string;
+  languages?: string;
+  experience_years?: number;
+  certifications?: string;
+  identity_document_url?: string;
+}
+
+export interface GuideApplicationResponse {
+  id: UUID;
+  userId: UUID;
+  biography: string | null;
+  areasCovered: string | null;
+  languages: string | null;
+  experienceYears: number | null;
+  certifications: string | null;
+  identityDocumentUrl: string | null;
+  status: ApplicationStatus;
+  submittedAt: ISODateString | null;
+  reviewedAt: ISODateString | null;
+  reviewedBy: UUID | null;
+  reviewNotes: string | null;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+// ---------------------------------------------------------------------------
 // Filter parameter types (mirrored from backend query schemas)
 // ---------------------------------------------------------------------------
 
@@ -126,6 +194,7 @@ export interface TravelConnection {
 export interface GuideFilter {
   country?: string;
   language?: string;
+  specialization?: string;
   availability?: AvailabilityStatus;
   verification_status?: VerificationStatus;
   page?: number;

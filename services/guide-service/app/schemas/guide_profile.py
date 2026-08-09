@@ -30,6 +30,7 @@ from app.models.guide_profile import VerificationStatus
 from app.schemas.guide_location import GuideLocationResponse
 from app.schemas.guide_language import GuideLanguageResponse
 from app.schemas.guide_availability import GuideAvailabilityResponse
+from app.schemas.guide_specialization import GuideSpecializationResponse
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +66,11 @@ class GuideProfileUpdate(BaseModel):
         le=80,
         description="Self-reported years of guiding experience (0–80).",
     )
+    price_per_day: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        description="Guide's daily rate in USD.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +93,7 @@ class GuideProfileResponse(BaseModel):
     profile_image_url: Optional[str]
     cover_image_url: Optional[str]
     years_experience: Optional[int]
+    price_per_day: Optional[Decimal]
 
     rating: Optional[Decimal]
     review_count: int
@@ -97,6 +104,7 @@ class GuideProfileResponse(BaseModel):
     locations: List[GuideLocationResponse] = Field(default_factory=list)
     languages: List[GuideLanguageResponse] = Field(default_factory=list)
     availability: Optional[GuideAvailabilityResponse] = None
+    specializations: List[GuideSpecializationResponse] = Field(default_factory=list)
 
     # Audit fields (from AuditMixin)
     created_at: datetime
@@ -130,6 +138,7 @@ class GuideProfileSummary(BaseModel):
     bio: Optional[str]
     profile_image_url: Optional[str]
     years_experience: Optional[int]
+    price_per_day: Optional[Decimal]
 
     rating: Optional[Decimal]
     review_count: int
@@ -140,3 +149,4 @@ class GuideProfileSummary(BaseModel):
     locations: List[GuideLocationResponse] = Field(default_factory=list)
     languages: List[GuideLanguageResponse] = Field(default_factory=list)
     availability: Optional[GuideAvailabilityResponse] = None
+    specializations: List[GuideSpecializationResponse] = Field(default_factory=list)

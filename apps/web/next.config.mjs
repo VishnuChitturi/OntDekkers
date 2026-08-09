@@ -51,6 +51,16 @@ const nextConfig = {
         destination: "http://expedition-service:8000/api/:path*",
       },
       {
+        // Trips API (MCP-1) — /api/v1/trips/* → expedition-service
+        source: "/api/v1/trips/:path*",
+        destination: "http://expedition-service:8000/api/v1/trips/:path*",
+      },
+      {
+        // My Trips endpoint — /api/v1/users/me/trips → expedition-service
+        source: "/api/v1/users/me/trips",
+        destination: "http://expedition-service:8000/api/v1/users/me/trips",
+      },
+      {
         // Feed Service — internal Docker hostname
         source: "/feed/api/:path*",
         destination: "http://feed-service:8000/api/:path*",

@@ -52,6 +52,8 @@ from app.repositories.user import (
 )
 from app.schemas.user import (
     BadgeResponse,
+    BatchProfileSummary,
+    BatchProfilesResponse,
     FollowerSummary,
     InterestResponse,
     MediaUploadResponse,
@@ -310,6 +312,34 @@ class UserService:
                 error_code="USER_NOT_FOUND",
             )
         return await self.get_public_profile(profile.username, viewer_jwt_payload=viewer_jwt_payload)
+
+    # ------------------------------------------------------------------
+    # Batch profile resolution (POST /users/batch-profiles)
+    # ------------------------------------------------------------------
+
+    async def batch_profiles(
+        self,
+        user_ids: List[uuid.UUID],
+    ) -> BatchProfilesResponse:
+        """
+        Return minimal public profile data for a list of user IDs.
+
+        Uses a single DB query (SELECT ... WHERE id IN (...)).
+        IDs not found are silently omitted; callers fall back to displaying
+        the raw UUID if a profile is missing.
+        """
+        profiles = await self._profiles.get_by_ids(user_ids)
+        return BatchProfilesResponse(
+            profiles=[
+                BatchProfileSummary(
+                    id=p.id,
+                    username=p.username,
+                    display_name=p.display_name,
+                    avatar_url=p.avatar_url,
+                )
+                for p in profiles
+            ]
+        )
 
     # ------------------------------------------------------------------
     # Update profile (PUT /users/me)

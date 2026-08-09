@@ -8,23 +8,19 @@
  * Layout:
  *   - Page title + search
  *   - Filter chips: Verified Only, Available Now (+ clear all)
+ *   - Location and specialization text filters
  *   - 3-column responsive guide grid
  *   - All four states: loading / empty / error / success
  *
  * Data (via Service Layer only — no direct Axios):
  *   useSWR([guideKeys.list(params)], swrFetcherWithParams)
  *   → PaginatedResponse<GuideProfileSummary>
- *
- * Actions:
- *   Bookmark  → bookmarkGuide / unbookmarkGuide + useToast
- *   Message   → (not in Dev 3 scope)
- *   View      → router.push(`/guides/${guide.id}`)
  */
 
 import React, { useState, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import { motion, AnimatePresence } from "motion/react";
-import { Map, RefreshCw, ShieldCheck, Wifi } from "lucide-react";
+import { Map, RefreshCw, ShieldCheck, Wifi, X } from "lucide-react";
 
 import GuideCard from "@/components/cards/GuideCard";
 import Button from "@/components/feedback/Button";
@@ -123,53 +119,54 @@ function FilterChip({
 }
 
 // ---------------------------------------------------------------------------
-// GuidesView
+// Text filter input
 // ---------------------------------------------------------------------------
 
-const MOCK_GUIDES: GuideProfileSummary[] = [
-  {
-    id: "g-1",
-    userId: "u-1",
-    displayName: "Mateo Rossi",
-    bio: "Certified Alpine Guide with 10+ years leading hut-to-hut treks across Mont Blanc, the Matterhorn, and South Tyrol.",
-    profileImageUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80",
-    verificationStatus: "VERIFIED",
-    availability: { guideId: "g-1", status: "AVAILABLE", note: null },
-    rating: 4.9,
-    reviewCount: 48,
-    yearsExperience: 10,
-    locations: [{ id: "l-1", guideId: "g-1", city: "Chamonix", country: "France", region: "Haute-Savoie" }],
-    languages: [{ id: "lang-1", guideId: "g-1", language: "English" }, { id: "lang-2", guideId: "g-1", language: "French" }],
-  },
-  {
-    id: "g-2",
-    userId: "u-2",
-    displayName: "Astrid Lindholm",
-    bio: "Nordic wilderness expert specializing in Arctic circle sea kayaking, northern lights hunting, and trail navigation.",
-    profileImageUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80",
-    verificationStatus: "VERIFIED",
-    availability: { guideId: "g-2", status: "AVAILABLE", note: null },
-    rating: 5.0,
-    reviewCount: 62,
-    yearsExperience: 8,
-    locations: [{ id: "l-2", guideId: "g-2", city: "Tromso", country: "Norway", region: "Troms" }],
-    languages: [{ id: "lang-3", guideId: "g-2", language: "English" }, { id: "lang-4", guideId: "g-2", language: "Norwegian" }],
-  },
-  {
-    id: "g-3",
-    userId: "u-3",
-    displayName: "Kenzo Tanaka",
-    bio: "Cultural heritage specialist & mountain monk trail expert. Guiding Kumano Kodo pilgrimage routes for 8 years.",
-    profileImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80",
-    verificationStatus: "VERIFIED",
-    availability: { guideId: "g-3", status: "BUSY", note: null },
-    rating: 4.95,
-    reviewCount: 39,
-    yearsExperience: 8,
-    locations: [{ id: "l-3", guideId: "g-3", city: "Tanabe", country: "Japan", region: "Wakayama" }],
-    languages: [{ id: "lang-5", guideId: "g-3", language: "Japanese" }, { id: "lang-6", guideId: "g-3", language: "English" }],
-  },
-];
+function FilterInput({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={[
+          "w-full px-3 py-1.5 pr-7 rounded-full border text-xs",
+          "focus:outline-none focus:ring-2 focus:ring-ink/20 focus:border-ink",
+          "transition-all duration-[var(--duration-responsive)]",
+          value
+            ? "border-ink bg-ink/5 text-ink"
+            : "border-gray-200 bg-white text-charcoal placeholder:text-muted-slate",
+        ].join(" ")}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label={`Clear ${label}`}
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-slate hover:text-ink transition-colors"
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GuidesView
+// ---------------------------------------------------------------------------
 
 export default function GuidesView() {
   const router = useRouter();
@@ -180,33 +177,32 @@ export default function GuidesView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [availableOnly, setAvailableOnly] = useState(false);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [specializationFilter, setSpecializationFilter] = useState("");
 
-  const filters = useMemo(() => ({
+  // API-level filters (sent to backend)
+  const apiFilters = useMemo(() => ({
     ...(verifiedOnly ? { verification_status: "VERIFIED" } : {}),
     ...(availableOnly ? { availability: "AVAILABLE" } : {}),
-    page_size: 18,
-  }), [verifiedOnly, availableOnly]);
+    ...(locationFilter.trim() ? { country: locationFilter.trim() } : {}),
+    ...(specializationFilter.trim() ? { specialization: specializationFilter.trim() } : {}),
+    page_size: 30,
+  }), [verifiedOnly, availableOnly, locationFilter, specializationFilter]);
 
-  const hasActiveFilters = verifiedOnly || availableOnly;
+  const hasActiveFilters =
+    verifiedOnly || availableOnly || !!locationFilter || !!specializationFilter;
 
   // ── SWR ───────────────────────────────────────────────────────────────────
-  const swrKey = guideKeys.list(filters);
+  const swrKey = guideKeys.list(apiFilters);
   const { data, isLoading, error, mutate } = useSWR<PaginatedResponse<GuideProfileSummary>>(
     swrKey,
     ([url, params]: [string, Record<string, unknown>]) => swrFetcherWithParams(url, params),
     { revalidateOnFocus: false },
   );
 
-  // Client-side search filter on top of API results or fallback
+  // Client-side search on top of API results
   const filteredGuides = useMemo(() => {
-    let guides = data?.items && data.items.length > 0 ? data.items : MOCK_GUIDES;
-
-    if (verifiedOnly) {
-      guides = guides.filter((g) => g.verificationStatus === "VERIFIED");
-    }
-    if (availableOnly) {
-      guides = guides.filter((g) => g.availability?.status === "AVAILABLE");
-    }
+    const guides: GuideProfileSummary[] = data?.items ?? [];
 
     if (!searchQuery.trim()) return guides;
     const q = searchQuery.toLowerCase();
@@ -216,9 +212,10 @@ export default function GuidesView() {
       g.locations.some((l) =>
         [l.country, l.region, l.city].some((v) => v?.toLowerCase().includes(q)),
       ) ||
-      g.languages.some((l) => l.language.toLowerCase().includes(q)),
+      g.languages.some((l) => l.language.toLowerCase().includes(q)) ||
+      (g.specializations ?? []).some((s) => s.category.toLowerCase().includes(q)),
     );
-  }, [data?.items, verifiedOnly, availableOnly, searchQuery]);
+  }, [data?.items, searchQuery]);
 
   // ── Bookmark action ────────────────────────────────────────────────────────
   const handleBookmark = useCallback(
@@ -240,6 +237,13 @@ export default function GuidesView() {
     [state.savedGuides, showToast],
   );
 
+  const clearAllFilters = () => {
+    setVerifiedOnly(false);
+    setAvailableOnly(false);
+    setLocationFilter("");
+    setSpecializationFilter("");
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <motion.div
@@ -249,11 +253,20 @@ export default function GuidesView() {
       transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
     >
       {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight text-ink">Guides</h1>
-        <p className="text-sm text-charcoal">
-          Discover verified local guides for your next expedition.
-        </p>
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight text-ink">Guides</h1>
+          <p className="text-sm text-charcoal">
+            Discover verified local guides for your next expedition.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push("/guides/apply")}
+        >
+          Become a Guide
+        </Button>
       </div>
 
       {/* ── Search + filters ─────────────────────────────────────────────── */}
@@ -266,6 +279,7 @@ export default function GuidesView() {
           ariaLabel="Search guides"
         />
 
+        {/* Boolean filter chips */}
         <div className="flex items-center gap-2 flex-wrap">
           <FilterChip
             label="Verified Only"
@@ -282,18 +296,35 @@ export default function GuidesView() {
           {hasActiveFilters && (
             <button
               type="button"
-              onClick={() => {
-                setVerifiedOnly(false);
-                setAvailableOnly(false);
-              }}
+              onClick={clearAllFilters}
               className="text-xs text-muted-slate hover:text-ink underline transition-colors duration-[var(--duration-responsive)]"
             >
               Clear all
             </button>
           )}
           <span className="ml-auto text-[10px] font-mono text-muted-slate">
-            Showing {filteredGuides.length} guides
+            {isLoading ? "Loading…" : `${filteredGuides.length} guides`}
           </span>
+        </div>
+
+        {/* Text filters: location + specialization */}
+        <div className="flex gap-2 flex-wrap">
+          <div className="w-40">
+            <FilterInput
+              label="Filter by location"
+              placeholder="Location (country)"
+              value={locationFilter}
+              onChange={setLocationFilter}
+            />
+          </div>
+          <div className="w-44">
+            <FilterInput
+              label="Filter by specialization"
+              placeholder="Specialization"
+              value={specializationFilter}
+              onChange={setSpecializationFilter}
+            />
+          </div>
         </div>
       </div>
 

@@ -17,6 +17,7 @@ Endpoint inventory:
   GET    /users/me/saved                        — list saved items
   POST   /users/me/saved                        — save an item
   DELETE /users/me/saved/{entity_type}/{entity_id} — unsave an item
+  POST   /users/batch-profiles                  — fetch multiple user profile summaries by ID
   GET    /users/{username}                      — public profile (by username)
   POST   /users/{user_id}/follow               — follow a user
   DELETE /users/{user_id}/follow               — unfollow a user
@@ -27,13 +28,15 @@ Endpoint inventory:
 """
 
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, status
 
 from app.dependencies.user import get_current_user_payload, get_optional_current_user_payload, get_user_service
 from app.schemas.user import (
     BadgeResponse,
+    BatchProfilesRequest,
+    BatchProfilesResponse,
     MediaUploadResponse,
     MessageResponse,
     PaginatedFollowersResponse,
@@ -220,6 +223,28 @@ async def unsave_item(
 # ---------------------------------------------------------------------------
 # Public profile (by username)
 # ---------------------------------------------------------------------------
+
+@router.post(
+    "/batch-profiles",
+    response_model=BatchProfilesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def batch_profiles(
+    body: BatchProfilesRequest,
+    svc: UserService = Depends(get_user_service),
+) -> BatchProfilesResponse:
+    """
+    Return minimal profile summaries (display_name, username, avatar_url) for
+    a batch of user IDs.
+
+    Accepts up to 200 IDs per request. IDs that do not exist are silently
+    omitted from the response — callers should fall back to displaying the
+    user ID if a profile is not returned.
+
+    This endpoint is unauthenticated — it only returns public-facing fields.
+    """
+    return await svc.batch_profiles(body.user_ids)
+
 
 @router.get(
     "/{username}",

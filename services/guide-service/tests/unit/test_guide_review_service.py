@@ -38,10 +38,12 @@ def _make_profile(
     p.locations = []
     p.languages = []
     p.availability = None
+    p.specializations = []
     p.bio = None
     p.profile_image_url = None
     p.cover_image_url = None
     p.years_experience = None
+    p.price_per_day = None
     p.is_deleted = False
     p.created_at = datetime.now(timezone.utc)
     p.updated_at = datetime.now(timezone.utc)
@@ -217,7 +219,7 @@ class TestListReviews:
         result = await service.list_reviews(profile.id, page=1, page_size=20)
 
         assert result.pagination.total_items == 3
-        assert len(result.reviews) == 3
+        assert len(result.items) == 3
         assert result.guide_id == profile.id
 
 

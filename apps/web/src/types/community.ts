@@ -1,5 +1,4 @@
 import type { UUID, ISODateString } from "./primitives";
-import type { UserSummary } from "./user";
 
 // ---------------------------------------------------------------------------
 // Community enumerations
@@ -13,10 +12,33 @@ export type MemberRole = "OWNER" | "MODERATOR" | "MEMBER";
 
 export type MemberStatus = "PENDING" | "ACTIVE" | "BANNED";
 
-export type CommunityJoinRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+/**
+ * Authoritative membership status returned by the backend on every
+ * CommunitySchema response.  Replaces all ephemeral local state.
+ *
+ *   NOT_MEMBER  — visitor / logged-out user
+ *   PENDING     — has a pending join request (private/approval-required)
+ *   MEMBER      — active member (MEMBER role)
+ *   CO_HEAD     — active moderator (MODERATOR role)
+ *   HEAD        — community owner (OWNER role)
+ */
+export type MembershipViewStatus =
+  | "NOT_MEMBER"
+  | "PENDING"
+  | "MEMBER"
+  | "CO_HEAD"
+  | "HEAD";
+
+export type CommunityJoinRequestStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "CANCELLED";
 
 // ---------------------------------------------------------------------------
 // Community interfaces
+// (field names here are camelCase — the axios interceptor converts
+// snake_case → camelCase so backend's `logo_url` becomes `logoUrl`, etc.)
 // ---------------------------------------------------------------------------
 
 export interface Community {
@@ -25,67 +47,47 @@ export interface Community {
   /** URL-safe identifier, e.g. "mountain-trekkers" */
   slug: string;
   description: string | null;
+  /** URL to the banner/cover image — from backend banner_url field */
   bannerUrl: string | null;
+  /** URL to the logo/profile image — from backend logo_url field */
   logoUrl: string | null;
   visibility: CommunityVisibility;
-  category: string | null;
   location: string | null;
-  createdBy: UUID;
+  /** Creator user ID — from backend creator_id */
+  creatorId: UUID;
   memberCount: number;
-  expeditionCount: number;
-  storyCount: number;
+  requiresApproval: boolean;
   /** Whether the current authenticated user is a member */
   isMember: boolean;
   /** Role of the current authenticated user; null when not a member */
   currentUserRole: MemberRole | null;
+  /**
+   * Authoritative membership status from the backend.
+   * Use this instead of isMember + local pendingRequest flags.
+   */
+  membershipStatus: MembershipViewStatus;
   status: CommunityStatus;
   rules: CommunityRule[];
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
 
+/**
+ * Lightweight community summary returned by the list endpoint.
+ * NOTE: The backend CommunitySummarySchema does not include bannerUrl.
+ */
 export interface CommunitySummary {
   id: UUID;
   name: string;
   slug: string;
   description: string | null;
-  bannerUrl: string | null;
   logoUrl: string | null;
   visibility: CommunityVisibility;
-  category: string | null;
   location: string | null;
   memberCount: number;
-  expeditionCount: number;
+  requiresApproval: boolean;
   isMember: boolean;
   status: CommunityStatus;
-}
-
-// ---------------------------------------------------------------------------
-// Member interface
-// ---------------------------------------------------------------------------
-
-export interface CommunityMember {
-  communityId: UUID;
-  userId: UUID;
-  /** Populated when user-service integration is available; null until then */
-  user?: UserSummary | null;
-  role: MemberRole;
-  status: MemberStatus;
-  joinedAt: ISODateString;
-}
-
-// ---------------------------------------------------------------------------
-// Join request interface
-// ---------------------------------------------------------------------------
-
-export interface JoinRequest {
-  id: UUID;
-  communityId: UUID;
-  userId: UUID;
-  /** Populated when user-service integration is available; null until then */
-  user?: UserSummary | null;
-  message: string | null;
-  status: CommunityJoinRequestStatus;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
@@ -99,125 +101,113 @@ export interface CommunityRule {
   communityId: UUID;
   title: string;
   description: string | null;
-  displayOrder: number;
+  /** Display sort order (1-based) — from backend order_index */
+  orderIndex: number;
 }
 
 // ---------------------------------------------------------------------------
-// Discussion interfaces
-// ---------------------------------------------------------------------------
-
-export interface Discussion {
-  id: UUID;
-  communityId: UUID;
-  authorId: UUID;
-  /** Populated when user-service integration is available; null until then */
-  author?: UserSummary | null;
-  title: string;
-  content: string;
-  isPinned: boolean;
-  isLocked: boolean;
-  commentCount: number;
-  createdAt: ISODateString;
-  updatedAt: ISODateString;
-}
-
-export interface DiscussionSummary {
-  id: UUID;
-  communityId: UUID;
-  authorId: UUID;
-  title: string;
-  commentCount: number;
-  isPinned: boolean;
-  isLocked: boolean;
-  createdAt: ISODateString;
-}
-
-export interface DiscussionComment {
-  id: UUID;
-  discussionId: UUID;
-  authorId: UUID;
-  /** Populated when user-service integration is available; null until then */
-  author?: UserSummary | null;
-  content: string;
-  createdAt: ISODateString;
-  updatedAt: ISODateString;
-}
-
-// ---------------------------------------------------------------------------
-// Community media upload request/response
-// ---------------------------------------------------------------------------
-
-export interface CommunityMediaUploadRequest {
-  /** "banner" or "logo" */
-  mediaType: "banner" | "logo";
-  /** The MIME type of the file, e.g. "image/jpeg" */
-  contentType: string;
-  fileSize: number;
-}
-
-export interface CommunityMediaUploadResponse {
-  /** Pre-signed PUT URL for uploading directly to MinIO */
-  uploadUrl: string;
-  /** Permanent object URL stored in the database after upload */
-  objectUrl: string;
-  storageKey: string;
-}
-
-// ---------------------------------------------------------------------------
-// Request / response shapes for mutations
+// Request shapes for mutations
 // ---------------------------------------------------------------------------
 
 export interface CreateCommunityRequest {
   name: string;
   description?: string | null;
   visibility: CommunityVisibility;
-  category?: string | null;
   location?: string | null;
-  /** Storage key for the banner image returned by the media upload flow */
-  bannerKey?: string | null;
-  /** Storage key for the logo image */
-  logoKey?: string | null;
+  /** If true, new members require approval before joining */
+  requires_approval?: boolean;
 }
 
 export interface UpdateCommunityRequest {
   name?: string;
   description?: string | null;
   visibility?: CommunityVisibility;
-  category?: string | null;
   location?: string | null;
-  bannerKey?: string | null;
-  logoKey?: string | null;
-}
-
-export interface CreateDiscussionRequest {
-  title: string;
-  content: string;
-}
-
-export interface CreateDiscussionCommentRequest {
-  content: string;
-}
-
-export interface JoinRequestPayload {
-  /** Optional message included with the join request for private communities */
-  message?: string | null;
+  requires_approval?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Filter parameter types (mirrored from backend query schemas)
 // ---------------------------------------------------------------------------
 
-/** Query filters for the community directory endpoint */
+/**
+ * Query filters for the community directory endpoint.
+ * The backend supports: limit, offset, search, location, visibility
+ */
 export interface CommunityFilter {
-  category?: string;
-  visibility?: CommunityVisibility;
+  limit?: number;
+  offset?: number;
+  search?: string;
   location?: string;
-  page?: number;
-  page_size?: number;
+  visibility?: CommunityVisibility;
 }
 
-/** Query filters for the community discussions endpoint */
-export interface DiscussionFilter {
-  page?: number;
-  page_size?: number;
+// ---------------------------------------------------------------------------
+// Membership types — CP-2
+// ---------------------------------------------------------------------------
+
+export type MembershipStatus = "ACTIVE" | "LEFT" | "REMOVED" | "BANNED";
+
+/**
+ * A community member record as returned by GET /{id}/members.
+ * NOTE: The backend only returns user_id, not profile data.
+ * Display name / username / avatar must be resolved separately
+ * from the user-service if available, or derived from context.
+ */
+export interface CommunityMember {
+  id: UUID;
+  communityId: UUID;
+  userId: UUID;
+  role: MemberRole;
+  status: MembershipStatus;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+/** Paginated response from GET /{id}/members */
+export interface MemberListResponse {
+  members: CommunityMember[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/** Result of POST /{id}/join for a public community */
+export interface JoinResult {
+  joined?: boolean;
+  requested?: boolean;
+  requestId?: UUID;
+}
+
+/** A join request record as returned by GET /{id}/join-requests */
+export interface CommunityJoinRequest {
+  id: UUID;
+  communityId: UUID;
+  requesterId: UUID;
+  message: string | null;
+  status: CommunityJoinRequestStatus;
+  reviewedBy: UUID | null;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+/** Paginated response from GET /{id}/join-requests */
+export interface JoinRequestListResponse {
+  requests: CommunityJoinRequest[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/** Request body for PUT /join-requests/{id} */
+export interface JoinRequestActionRequest {
+  action: "approve" | "reject";
+}
+
+/** Request body for PUT /{id}/members/{userId}/role */
+export interface MemberRoleUpdateRequest {
+  /** Backend enum: MODERATOR | MEMBER (OWNER blocked by backend validator) */
+  role: "MODERATOR" | "MEMBER";
 }

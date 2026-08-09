@@ -3,35 +3,30 @@
 /**
  * OntDekker MyTripsView
  *
- * Expedition listing. Entry from Sidebar "My Trips".
+ * Shows all trips where the authenticated user is a host or member.
+ * Data: GET /api/v1/users/me/trips  (expedition-service, trip-centric surface)
  *
  * Sections:
- *   - Page header + status filter chips (All / Active / Upcoming / Completed)
+ *   - Page header + Create Trip button
+ *   - Status filter chips (All / Active / Upcoming / Completed)
  *   - 3-column responsive TripCard grid
- *   - All four states: loading / empty / error / success
- *
- * Data (Service Layer):
- *   useSWR(expeditionKeys.mine(params), swrFetcherWithParams)
- *   → PaginatedResponse<ExpeditionSummary>
- *
- * Card click → router.push(`/expeditions/${expedition.id}`)
+ *   - Loading / empty / error / success states
  */
 
 import React, { useState, useMemo } from "react";
 import useSWR from "swr";
 import { motion, AnimatePresence } from "motion/react";
-import { Backpack, RefreshCw } from "lucide-react";
+import { Backpack, Plus, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import TripCard from "@/components/cards/TripCard";
 import Button from "@/components/feedback/Button";
-
-import { swrFetcherWithParams, expeditionKeys } from "@/services/cache";
-import { useRouter } from "next/navigation";
-import { useToast } from "@/hooks/useToast";
-
+import { swrFetcherWithParams, tripKeys } from "@/services/cache";
 import TripCardSkeleton from "./TripCardSkeleton";
+import CreateTripModal from "./CreateTripModal";
 
-import type { ExpeditionSummary, PaginatedResponse, ExpeditionStatus } from "@/types";
+import type { PaginatedResponse } from "@/types";
+import type { TripSummary, TripStatus } from "@/types/trip";
 
 // ---------------------------------------------------------------------------
 // Filter chips
@@ -47,11 +42,11 @@ const FILTER_LABELS: Record<StatusFilter, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Empty + Error
+// Empty + Error states
 // ---------------------------------------------------------------------------
 
 function EmptyTrips({ filter }: { filter: StatusFilter }) {
-  const label = filter === "all" ? "upcoming trips" : FILTER_LABELS[filter].toLowerCase() + " trips";
+  const label = filter === "all" ? "trips yet" : `${FILTER_LABELS[filter].toLowerCase()} trips`;
   return (
     <motion.div
       className="flex flex-col items-center justify-center py-20 text-center space-y-4"
@@ -62,7 +57,7 @@ function EmptyTrips({ filter }: { filter: StatusFilter }) {
       <div className="space-y-1">
         <p className="text-sm font-semibold text-ink">No {label}.</p>
         <p className="text-xs text-muted-slate max-w-xs">
-          Join or create an expedition to see it here.
+          Join or create a trip to see it here.
         </p>
       </div>
     </motion.div>
@@ -87,131 +82,111 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
 // MyTripsView
 // ---------------------------------------------------------------------------
 
-const MOCK_TRIPS: ExpeditionSummary[] = [
-  {
-    id: "exp-1",
-    communityId: "c-1",
-    organizerId: "o-1",
-    title: "Dolomites Autumn High-Route",
-    destination: "South Tyrol, Italy",
-    startDate: "2024-09-15",
-    endDate: "2024-09-22",
-    status: "PUBLISHED",
-    visibility: "PUBLIC",
-    coverImageUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80",
-    budget: 850,
-    maxParticipants: 8,
-    currentParticipantsCount: 6,
-    organizerName: "Alex Rivera",
-  },
-  {
-    id: "exp-2",
-    communityId: "c-2",
-    organizerId: "o-2",
-    title: "Flam Fjord Kayak & Camp",
-    destination: "Flam, Norway",
-    startDate: "2024-10-02",
-    endDate: "2024-10-07",
-    status: "ACTIVE",
-    visibility: "PUBLIC",
-    coverImageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80",
-    budget: 1100,
-    maxParticipants: 6,
-    currentParticipantsCount: 4,
-    organizerName: "Astrid Lindholm",
-  },
-];
-
 export default function MyTripsView() {
   const router = useRouter();
-
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [createOpen, setCreateOpen] = useState(false);
 
-  const params = useMemo(() => ({
-    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
-    page_size: 18,
-  }), [statusFilter]);
+  const params = useMemo(
+    () => ({
+      ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+      page_size: 18,
+    }),
+    [statusFilter],
+  );
 
-  // ── SWR ───────────────────────────────────────────────────────────────────
-  const { data, isLoading } = useSWR<PaginatedResponse<ExpeditionSummary>>(
-    expeditionKeys.mine(params),
+  const { data, isLoading, error, mutate } = useSWR<PaginatedResponse<TripSummary>>(
+    tripKeys.mine(params),
     ([url, p]: [string, Record<string, unknown>]) => swrFetcherWithParams(url, p),
     { revalidateOnFocus: false },
   );
 
-  const trips = useMemo(() => {
-    let list = data?.items && data.items.length > 0 ? data.items : MOCK_TRIPS;
-    if (statusFilter !== "all") {
-      list = list.filter((t) => t.status === statusFilter);
-    }
-    return list;
-  }, [data?.items, statusFilter]);
+  const trips = data?.items ?? [];
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <motion.div
-      className="container-main py-8 space-y-6 pb-20"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
-    >
-      {/* Header */}
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight text-ink">My Trips</h1>
-        <p className="text-sm text-charcoal">
-          Your expeditions — active, upcoming, and completed.
-        </p>
-      </div>
-
-      {/* Status filter chips */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {(Object.keys(FILTER_LABELS) as StatusFilter[]).map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            aria-pressed={statusFilter === filter}
-            onClick={() => setStatusFilter(filter)}
-            className={[
-              "inline-flex items-center px-3 py-1.5 rounded-full border text-xs font-medium",
-              "transition-all duration-[var(--duration-responsive)]",
-              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
-              statusFilter === filter
-                ? "bg-ink text-white border-ink"
-                : "bg-white text-charcoal border-gray-200 hover:border-gray-300 hover:bg-gray-50",
-            ].join(" ")}
-          >
-            {FILTER_LABELS[filter]}
-          </button>
-        ))}
-        {data && (
-          <span className="ml-auto text-[10px] font-mono text-muted-slate">
-            {trips.length} of {data.pagination.totalItems}
-          </span>
-        )}
-      </div>
-
-      {/* Trip grid — all states */}
-      <AnimatePresence mode="wait">
-        {isLoading && !data ? (
-          <TripCardSkeleton key="skeleton" count={6} />
-        ) : trips.length === 0 ? (
-          <EmptyTrips key="empty" filter={statusFilter} />
-        ) : (
-          <div
-            key="trips"
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
-          >
-            {trips.map((trip, index) => (
-              <TripCard
-                key={trip.id}
-                trip={trip}
-                index={index}
-                onClick={() => router.push(`/expeditions/${trip.id}`)}
-              />
-            ))}
+    <>
+      <motion.div
+        className="container-main py-8 space-y-6 pb-20"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight text-ink">My Trips</h1>
+            <p className="text-sm text-charcoal">
+              Your expeditions — active, upcoming, and completed.
+            </p>
           </div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            onClick={() => setCreateOpen(true)}
+          >
+            Create Trip
+          </Button>
+        </div>
+
+        {/* Status filter chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {(Object.keys(FILTER_LABELS) as StatusFilter[]).map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              aria-pressed={statusFilter === filter}
+              onClick={() => setStatusFilter(filter)}
+              className={[
+                "inline-flex items-center px-3 py-1.5 rounded-full border text-xs font-medium",
+                "transition-all duration-[var(--duration-responsive)]",
+                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
+                statusFilter === filter
+                  ? "bg-ink text-white border-ink"
+                  : "bg-white text-charcoal border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+              ].join(" ")}
+            >
+              {FILTER_LABELS[filter]}
+            </button>
+          ))}
+          {data && (
+            <span className="ml-auto text-[10px] font-mono text-muted-slate">
+              {data.pagination.totalItems} trip{data.pagination.totalItems !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+
+        {/* Trip grid — all states */}
+        <AnimatePresence mode="wait">
+          {error ? (
+            <ErrorBanner key="error" onRetry={() => mutate()} />
+          ) : isLoading && !data ? (
+            <TripCardSkeleton key="skeleton" count={6} />
+          ) : trips.length === 0 ? (
+            <EmptyTrips key="empty" filter={statusFilter} />
+          ) : (
+            <div
+              key="trips"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+            >
+              {trips.map((trip, index) => (
+                <TripCard
+                  key={trip.id}
+                  trip={trip}
+                  index={index}
+                  onClick={() => router.push(`/expeditions/${trip.id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+
+      <CreateTripModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => mutate()}
+      />
+    </>
   );
 }

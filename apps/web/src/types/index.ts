@@ -12,3 +12,4 @@ export * from "./expedition";
 export * from "./guide";
 export * from "./feed";
 export * from "./community";
+export * from "./trip";

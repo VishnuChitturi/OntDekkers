@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from contextlib import asynccontextmanager
 from typing import Dict, Any
@@ -25,6 +26,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     dependencies=[Depends(get_request_id)]
+)
+
+# ---------------------------------------------------------------------------
+# CORS — allow requests from the Next.js frontend in all environments.
+# In Docker, the browser accesses the API via Traefik on port 80, while the
+# page is served from localhost:3000 — a different origin that requires CORS.
+# Origins are configured via ALLOWED_ORIGINS in settings (env-backed).
+# ---------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 register_exception_handlers(app)

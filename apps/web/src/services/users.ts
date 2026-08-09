@@ -436,3 +436,58 @@ export async function uploadCover(
   );
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Batch profile resolution — POST /users/batch-profiles
+// ---------------------------------------------------------------------------
+
+/** Minimal profile summary returned by the batch-profiles endpoint */
+export interface BatchProfileSummary {
+  /** UUID — matches the user_id in community member records */
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/** Map from user UUID → profile summary for O(1) lookups in the UI */
+export type ProfileMap = Record<string, BatchProfileSummary>;
+
+/**
+ * Fetch minimal profile summaries for a list of user IDs in a single request.
+ *
+ * Uses POST /users/batch-profiles which executes a single DB query.
+ * Do NOT call per-member — always collect IDs and batch-resolve.
+ *
+ * Returns a ProfileMap keyed by user ID for easy component lookups.
+ * IDs with no matching profile are omitted from the map.
+ */
+export async function batchProfiles(
+  userIds: string[]
+): Promise<ProfileMap> {
+  if (userIds.length === 0) return {};
+  // Deduplicate before sending
+  const unique = [...new Set(userIds)];
+  // NOTE: userHttp does not apply snake_case→camelCase, so we map manually.
+  const response = await userHttp.post<{
+    profiles: Array<{
+      id: string;
+      username: string;
+      display_name: string;
+      avatar_url: string | null;
+    }>;
+  }>(
+    "/users/batch-profiles",
+    { user_ids: unique }
+  );
+  const map: ProfileMap = {};
+  for (const p of response.data.profiles) {
+    map[p.id] = {
+      id: p.id,
+      username: p.username,
+      displayName: p.display_name,
+      avatarUrl: p.avatar_url,
+    };
+  }
+  return map;
+}

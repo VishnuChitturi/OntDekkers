@@ -81,6 +81,10 @@ class GuideFilter(BaseModel):
         default=None,
         description="Filter guides who speak this language.",
     )
+    specialization: Optional[str] = Field(
+        default=None,
+        description="Filter guides who have this specialization category.",
+    )
     availability: Optional[AvailabilityStatus] = Field(
         default=None,
         description="Filter guides by current availability status.",

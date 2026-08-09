@@ -287,13 +287,38 @@ class MembershipService:
             has_more=len(requests) == limit and offset + len(requests) < total,
         )
 
+    async def cancel_join_request(
+        self,
+        request_id: uuid.UUID,
+        current_user_id: uuid.UUID,
+    ) -> None:
+        """
+        Cancel the requester's own pending join request.
+        Only the original requester can cancel.
+        """
+        join_request = await self.membership_repo.get_join_request_by_id(request_id)
+        if not join_request:
+            raise NotFoundError(f"Join request {request_id} not found")
+
+        if join_request.requester_id != current_user_id:
+            raise ForbiddenError("You can only cancel your own join request")
+
+        if join_request.status != JoinRequestStatus.PENDING:
+            raise ValidationError("Only pending join requests can be cancelled")
+
+        await self.membership_repo.update_join_request_status(
+            request_id=request_id,
+            status=JoinRequestStatus.CANCELLED,
+            reviewed_by=None,
+        )
+        await self.session.commit()
+
     async def action_join_request(
         self,
         request_id: uuid.UUID,
         action_request: JoinRequestActionRequest,
         current_user_id: uuid.UUID,
     ) -> JoinRequestSchema:
-        """Approve or reject a join request — MOD or OWNER only."""
         join_request = await self.membership_repo.get_join_request_by_id(request_id)
         if not join_request:
             raise NotFoundError(f"Join request {request_id} not found")

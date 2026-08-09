@@ -64,6 +64,18 @@ class ProfileRepository:
         )
         return r.scalar_one_or_none()
 
+    async def get_by_ids(self, profile_ids: List[uuid.UUID]) -> List[UserProfile]:
+        """Fetch multiple profiles by their IDs in a single query."""
+        if not profile_ids:
+            return []
+        r = await self._s.execute(
+            select(UserProfile).where(
+                UserProfile.id.in_(profile_ids),
+                UserProfile.is_deleted == False,  # noqa: E712
+            )
+        )
+        return list(r.scalars().all())
+
     async def create(
         self,
         auth_user_id: uuid.UUID,
