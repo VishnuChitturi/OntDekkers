@@ -14,6 +14,10 @@ export type TripStatus =
 
 export type TripVisibility = "PUBLIC" | "PRIVATE";
 
+export type TripParticipantRole = "ORGANIZER" | "CO_ORGANIZER" | "PARTICIPANT";
+
+export type TripParticipantStatus = "ACTIVE" | "LEFT" | "REMOVED";
+
 // ---------------------------------------------------------------------------
 // Trip interfaces
 // ---------------------------------------------------------------------------
@@ -37,6 +41,25 @@ export interface Trip {
   hostName: string | null;
   createdAt: ISODateString;
   updatedAt: ISODateString;
+}
+
+/**
+ * A single participant record — returned by
+ * GET /expeditions/api/v1/expeditions/{id}/participants.
+ *
+ * Note: user_id and role are the only fields available until the
+ * user-service integration is implemented. Display names must be
+ * fetched separately (future CP-TRIP-2B-2).
+ */
+export interface TripParticipant {
+  id: UUID;
+  expedition_id: UUID;
+  user_id: UUID;
+  role: TripParticipantRole;
+  status: TripParticipantStatus;
+  joined_at: ISODateString;
+  created_at: ISODateString;
+  updated_at: ISODateString;
 }
 
 /** Lightweight card — returned by GET /api/v1/trips list */

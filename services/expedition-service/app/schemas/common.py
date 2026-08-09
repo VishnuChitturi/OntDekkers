@@ -18,6 +18,7 @@ from typing import Generic, List, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from app.models.expedition import ExpeditionStatus, ExpeditionVisibility
 
@@ -32,36 +33,42 @@ T = TypeVar("T")
 class PaginationMeta(BaseModel):
     """Metadata returned alongside every paginated list response.
 
-    Included in every GET list endpoint so the frontend can build
-    infinite scroll or numbered pagination without a separate count call.
+    Field names are serialised as camelCase in JSON so the frontend
+    TypeScript interface (pageSize, totalItems, totalPages, hasNext,
+    hasPrevious) matches directly.
     """
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
 
     page: int = Field(
         ...,
         ge=1,
         description="Current page number (1-indexed).",
     )
-    page_size: int = Field(
+    page_size: int = Field(       # → pageSize in JSON
         ...,
         ge=1,
         le=100,
         description="Number of items per page (max 100).",
     )
-    total_items: int = Field(
+    total_items: int = Field(     # → totalItems in JSON
         ...,
         ge=0,
         description="Total number of items matching the current filter.",
     )
-    total_pages: int = Field(
+    total_pages: int = Field(     # → totalPages in JSON
         ...,
         ge=0,
         description="Total number of pages given current page_size.",
     )
-    has_next: bool = Field(
+    has_next: bool = Field(       # → hasNext in JSON
         ...,
         description="True if there is at least one more page after this one.",
     )
-    has_previous: bool = Field(
+    has_previous: bool = Field(   # → hasPrevious in JSON
         ...,
         description="True if there is at least one page before this one.",
     )

@@ -9,8 +9,8 @@ Schema hierarchy:
   TripBase       — shared validators
   TripCreate     — POST /api/v1/trips
   TripUpdate     — PUT /api/v1/trips/{id}
-  TripResponse   — full detail (single trip)
-  TripSummary    — card view (paginated list)
+  TripResponse   — full detail (single trip) — serialised as camelCase JSON
+  TripSummary    — card view (paginated list) — serialised as camelCase JSON
   TripFilter     — query params for listing / search
 """
 
@@ -22,6 +22,7 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.alias_generators import to_camel
 from typing_extensions import Self
 
 from app.models.expedition import ExpeditionStatus, ExpeditionVisibility
@@ -90,25 +91,31 @@ class TripUpdate(TripBase):
 # ---------------------------------------------------------------------------
 
 class TripResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """Full trip detail. Serialised as camelCase JSON for the frontend."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
 
     id: UUID
     community_id: Optional[UUID]
-    host_id: UUID          # mapped from organizer_id
+    host_id: UUID          # → hostId in JSON
     title: str
     destination: str
     description: Optional[str]
-    cover_image_url: Optional[str]
-    start_date: Optional[date]
-    end_date: Optional[date]
+    cover_image_url: Optional[str]   # → coverImageUrl in JSON
+    start_date: Optional[date]       # → startDate in JSON
+    end_date: Optional[date]         # → endDate in JSON
     budget: Optional[Decimal]
-    max_participants: int
-    current_participants_count: int = 0
+    max_participants: int             # → maxParticipants in JSON
+    current_participants_count: int = 0  # → currentParticipantsCount in JSON
     visibility: ExpeditionVisibility
     status: ExpeditionStatus
-    host_name: Optional[str] = None   # populated by service layer
-    created_at: datetime
-    updated_at: datetime
+    host_name: Optional[str] = None  # → hostName in JSON
+    created_at: datetime             # → createdAt in JSON
+    updated_at: datetime             # → updatedAt in JSON
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +123,13 @@ class TripResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TripSummary(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """Lightweight card summary. Serialised as camelCase JSON for the frontend."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
 
     id: UUID
     community_id: Optional[UUID]
@@ -131,7 +144,7 @@ class TripSummary(BaseModel):
     current_participants_count: int = 0
     visibility: ExpeditionVisibility
     status: ExpeditionStatus
-    host_name: Optional[str] = None   # populated by service layer
+    host_name: Optional[str] = None
     created_at: datetime
 
 

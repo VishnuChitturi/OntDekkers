@@ -15,9 +15,11 @@
 import React, { useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { useSWRConfig } from "swr";
 import { FormField, TextInput, TextareaInput } from "@/components/forms";
 import Button from "@/components/feedback/Button";
 import { createTrip } from "@/services/tripsApi";
+import { tripKeys } from "@/services/cache";
 import { useToast } from "@/hooks/useToast";
 import type { CreateTripRequest } from "@/types/trip";
 
@@ -87,6 +89,7 @@ export default function CreateTripModal({ open, onClose, onCreated }: Props) {
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const { showToast } = useToast();
+  const { mutate } = useSWRConfig();
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -120,6 +123,23 @@ export default function CreateTripModal({ open, onClose, onCreated }: Props) {
       showToast("Trip created!", "success");
       setForm(DEFAULT);
       setErrors({});
+      // Revalidate both the public trips list and the user's own trips list
+      // so the new trip appears immediately on both /trips and /my-trips,
+      // regardless of which page opened this modal.
+      await Promise.all([
+        mutate(
+          (key) =>
+            Array.isArray(key) && key[0] === tripKeys.all()[0],
+          undefined,
+          { revalidate: true },
+        ),
+        mutate(
+          (key) =>
+            Array.isArray(key) && key[0] === tripKeys.mine()[0],
+          undefined,
+          { revalidate: true },
+        ),
+      ]);
       onCreated?.();
       onClose();
     } catch {

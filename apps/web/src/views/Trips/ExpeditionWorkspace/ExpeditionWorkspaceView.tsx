@@ -10,11 +10,32 @@
  *   Discussion  — expedition discussion thread
  *   Packing     — gear list with weight summary + WeightBadge
  *   Gallery     — photo gallery
- *   Members     — participant roster
+ *   Members     — participant roster with real user profiles
+ *
+ * Data sources (all real — no mock data):
+ *   - Trip detail:         GET /api/v1/trips/{id}                              → Trip
+ *   - My participant:      GET /api/v1/trips/{id}/me/participant               → TripParticipant | null
+ *   - Participants:        GET /expeditions/api/v1/expeditions/{id}/participants → TripParticipant[]
+ *   - User profiles:       POST /users/batch-profiles (user-service)           → ProfileMap
+ *   - Gallery:             GET /expeditions/api/v1/expeditions/{id}/gallery    → GalleryResponse
+ *   - Gear:                GET /expeditions/api/v1/expeditions/{id}/gear       → GearResponse
+ *
+ * Registration lifecycle:
+ *   - ORGANIZER  → shows "You are the Organiser" badge + Delete Trip button
+ *   - PARTICIPANT → shows "Registered" state — no re-register button
+ *   - NOT REGISTERED → shows "Register for Expedition" button → POST /api/v1/trips/{id}/join
+ *   - After join: revalidates trip, participants, my-trips
+ *   - Duplicate join (409 ALREADY_MEMBER) → handled gracefully
+ *
+ * Deletion (organizer only):
+ *   - Delete button visible only to the organizer (user.id === trip.hostId)
+ *   - Confirmation dialog prevents accidental deletion
+ *   - DELETE /api/v1/trips/{id} — backend enforces authorization
+ *   - On success: invalidates trip cache, public trips, my-trips → navigates to /trips
  */
 
-import React, { useState } from "react";
-import useSWR from "swr";
+import React, { useEffect, useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard,
@@ -27,6 +48,10 @@ import {
   Scale,
   CheckCircle2,
   UserPlus,
+  ImageOff,
+  Crown,
+  Trash2,
+  X,
 } from "lucide-react";
 
 import ExpeditionHeader from "@/components/headers/ExpeditionHeader";
@@ -35,91 +60,21 @@ import Avatar from "@/components/feedback/Avatar";
 import Button from "@/components/feedback/Button";
 import { WeightBadge } from "@/components/feedback/Badge";
 
-import { swrFetcher, expeditionKeys } from "@/services/cache";
+import { swrFetcher, expeditionKeys, tripKeys } from "@/services/cache";
 import { useRouter, useParams } from "next/navigation";
 import { useToast } from "@/hooks/useToast";
+import { useAuth } from "@/contexts/AuthContext";
+import { batchProfiles, type ProfileMap } from "@/services/users";
+import { joinTrip, deleteTrip } from "@/services/tripsApi";
+import { ApiError } from "@/services/api";
 
 import type {
-  ApiResponse,
-  Expedition,
   GearItem,
   PackWeightSummary,
   GalleryPhoto,
-  GearCategory,
-  UserSummary,
 } from "@/types";
+import type { Trip, TripParticipant } from "@/types/trip";
 import type { TabItem } from "@/components/navigation/Tabs";
-
-// ---------------------------------------------------------------------------
-// Fallback Mock Expeditions
-// ---------------------------------------------------------------------------
-
-const MOCK_EXPEDITIONS: Record<string, Expedition> = {
-  "exp-1": {
-    id: "exp-1",
-    communityId: "comm-1",
-    organizerId: "u-1",
-    title: "Dolomites Autumn Ridge Trek",
-    destination: "South Tyrol, Italy",
-    description: "6-day hut-to-hut alpine trek across the iconic jagged peaks of Alta Via 1. Experiencing peak autumn colors, traditional South Tyrolean cuisine, and high-altitude solitude.",
-    coverImageUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80",
-    startDate: "2026-09-15T00:00:00Z",
-    endDate: "2026-09-20T00:00:00Z",
-    budget: 1250,
-    maxParticipants: 8,
-    currentParticipantsCount: 5,
-    visibility: "PUBLIC",
-    status: "PUBLISHED",
-    meetingPoint: "Cortina d'Ampezzo Bus Terminal",
-    organizer: {
-      id: "u-1",
-      username: "marc_alps",
-      displayName: "Marc Dubois",
-      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
-    },
-    createdAt: "2026-06-01T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z",
-  },
-  "exp-2": {
-    id: "exp-2",
-    communityId: "comm-2",
-    organizerId: "u-2",
-    title: "Fjord Kayaking & Wilderness Camping",
-    destination: "Flåm, Norway",
-    description: "Paddling deep into Nærøyfjord UNESCO biosphere. Night camping on secluded pebble beaches, campfire tagines, and morning fjord dips.",
-    coverImageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
-    startDate: "2026-10-02T00:00:00Z",
-    endDate: "2026-10-07T00:00:00Z",
-    budget: 1400,
-    maxParticipants: 6,
-    currentParticipantsCount: 4,
-    visibility: "PUBLIC",
-    status: "PUBLISHED",
-    meetingPoint: "Flåm Harbor Railway Station",
-    organizer: {
-      id: "u-2",
-      username: "astrid_fjords",
-      displayName: "Astrid Lindgren",
-      avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
-    },
-    createdAt: "2026-06-15T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z",
-  },
-};
-
-function getFallbackExpedition(id: string): Expedition {
-  const matched = MOCK_EXPEDITIONS[id] || MOCK_EXPEDITIONS["exp-1"];
-  const formattedTitle = id
-    .replace(/^exp-/, "Expedition ")
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-
-  return {
-    ...matched,
-    id: id,
-    title: matched.title ?? formattedTitle,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Tab definitions
@@ -134,24 +89,119 @@ const TABS: TabItem[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// SWR key for the current user's participant status
+// ---------------------------------------------------------------------------
+const myParticipantKey = (tripId: string) =>
+  `/api/v1/trips/${tripId}/me/participant`;
+
+// ---------------------------------------------------------------------------
 // Tab: Overview
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ expedition }: { expedition: Expedition }) {
-  const { showToast } = useToast();
-  const [registered, setRegistered] = useState(false);
-  const [count, setCount] = useState(expedition.currentParticipantsCount ?? 5);
+interface OverviewTabProps {
+  trip: Trip;
+  tripId: string;
+  myParticipant: TripParticipant | null;
+  isLoadingMyParticipant: boolean;
+}
 
-  function handleRegister() {
-    if (registered) {
-      setRegistered(false);
-      setCount((c) => Math.max(0, c - 1));
-      showToast("Unregistered from expedition.", "info");
-    } else {
-      setRegistered(true);
-      setCount((c) => c + 1);
-      showToast("Registered successfully for expedition! Check your packing list.", "success");
+function OverviewTab({
+  trip,
+  tripId,
+  myParticipant,
+  isLoadingMyParticipant,
+}: OverviewTabProps) {
+  const { showToast } = useToast();
+  const { mutate } = useSWRConfig();
+  const [joining, setJoining] = useState(false);
+
+  // Derive registration state from real participant record
+  const isOrganizer = myParticipant?.role === "ORGANIZER";
+  const isRegistered = myParticipant?.status === "ACTIVE";
+
+  // Participant count comes from the real backend (count_active_participants)
+  const count = trip.currentParticipantsCount;
+
+  async function handleRegister() {
+    if (joining) return;
+    setJoining(true);
+    try {
+      await joinTrip(tripId);
+      showToast("Registered successfully for the expedition! Check your packing list.", "success");
+      // Revalidate trip detail (count), participants list, my-trips, and my participant status
+      await Promise.all([
+        mutate(tripKeys.byId(tripId)),
+        mutate(expeditionKeys.participants(tripId)),
+        mutate(myParticipantKey(tripId)),
+        mutate(
+          (key) => Array.isArray(key) && key[0] === tripKeys.mine()[0],
+          undefined,
+          { revalidate: true },
+        ),
+      ]);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ALREADY_MEMBER") {
+        showToast("You are already registered for this expedition.", "info");
+        // Revalidate to sync state in case of desync
+        await mutate(myParticipantKey(tripId));
+      } else {
+        showToast("Failed to register. Please try again.", "error");
+      }
+    } finally {
+      setJoining(false);
     }
+  }
+
+  function renderRegistrationButton() {
+    if (isLoadingMyParticipant) {
+      return (
+        <div className="h-9 w-40 rounded-xl bg-gray-100 animate-pulse" />
+      );
+    }
+
+    if (isOrganizer) {
+      return (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium">
+          <Crown size={15} />
+          You are the Organiser
+        </div>
+      );
+    }
+
+    if (isRegistered) {
+      return (
+        <Button
+          variant="outline"
+          size="md"
+          disabled
+          className="border-green-200 bg-green-50 text-green-700 cursor-default"
+        >
+          <CheckCircle2 size={16} className="mr-1.5" />
+          Registered
+        </Button>
+      );
+    }
+
+    return (
+      <Button
+        variant="primary"
+        size="md"
+        onClick={handleRegister}
+        disabled={joining}
+      >
+        {joining ? (
+          <span className="flex items-center gap-2">
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+            Registering…
+          </span>
+        ) : (
+          <>
+            <UserPlus size={16} className="mr-1.5" />
+            Register for Expedition
+          </>
+        )}
+      </Button>
+    );
   }
 
   return (
@@ -166,66 +216,54 @@ function OverviewTab({ expedition }: { expedition: Expedition }) {
         <div>
           <h3 className="text-base font-bold text-ink">Expedition Registration</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            {count} / {expedition.maxParticipants} spots filled ({expedition.maxParticipants - count} spots left)
+            {count} / {trip.maxParticipants} spots filled&nbsp;
+            ({Math.max(0, trip.maxParticipants - count)} spots left)
           </p>
         </div>
-        <Button
-          variant={registered ? "outline" : "primary"}
-          size="md"
-          onClick={handleRegister}
-          className={registered ? "border-green-200 bg-green-50 text-green-700" : ""}
-        >
-          {registered ? (
-            <>
-              <CheckCircle2 size={16} className="mr-1.5" />
-              Registered
-            </>
-          ) : (
-            <>
-              <UserPlus size={16} className="mr-1.5" />
-              Register for Expedition
-            </>
-          )}
-        </Button>
+        {renderRegistrationButton()}
       </div>
 
       <div className="bg-white border border-gray-100 rounded-3xl p-5 space-y-3 shadow-2xs">
         <h3 className="text-xs font-mono uppercase tracking-wider text-muted-slate">Details</h3>
         <dl className="space-y-2 text-sm">
-          {expedition.startDate && (
+          {trip.startDate && (
             <div className="flex justify-between">
               <dt className="text-muted-slate">Start</dt>
               <dd className="font-mono font-medium text-ink">
-                {new Date(expedition.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                {new Date(trip.startDate).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
               </dd>
             </div>
           )}
-          {expedition.endDate && (
+          {trip.endDate && (
             <div className="flex justify-between">
               <dt className="text-muted-slate">End</dt>
               <dd className="font-mono font-medium text-ink">
-                {new Date(expedition.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                {new Date(trip.endDate).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
               </dd>
             </div>
           )}
-          {expedition.budget !== null && (
+          {trip.budget !== null && (
             <div className="flex justify-between">
               <dt className="text-muted-slate">Budget</dt>
-              <dd className="font-mono font-medium text-ink">${expedition.budget.toLocaleString()}</dd>
+              <dd className="font-mono font-medium text-ink">
+                ${Number(trip.budget).toLocaleString()}
+              </dd>
             </div>
           )}
           <div className="flex justify-between">
             <dt className="text-muted-slate">Capacity</dt>
             <dd className="font-mono font-medium text-ink">
-              {count} / {expedition.maxParticipants}
+              {count} / {trip.maxParticipants}
             </dd>
           </div>
-          {expedition.meetingPoint && (
-            <div className="flex justify-between">
-              <dt className="text-muted-slate">Meeting point</dt>
-              <dd className="font-medium text-ink text-right max-w-[60%]">{expedition.meetingPoint}</dd>
-            </div>
-          )}
         </dl>
       </div>
     </motion.div>
@@ -243,15 +281,25 @@ function PackingTab({ expeditionId }: { expeditionId: string }) {
     { revalidateOnFocus: false }
   );
 
-  const mockGear: GearItem[] = [
-    { id: "g1", expeditionId, name: "Ultralight 2-Person Alpine Tent", weightGrams: 1450, quantity: 1, category: "BASE_PACK", isPacked: true, addedBy: "u-1" },
-    { id: "g2", expeditionId, name: "3-Season Sleeping Bag (-5°C)", weightGrams: 980, quantity: 1, category: "BASE_PACK", isPacked: true, addedBy: "u-1" },
-    { id: "g3", expeditionId, name: "Compact Isobutane Stove + Pot", weightGrams: 320, quantity: 1, category: "CONSUMABLES", isPacked: false, addedBy: "u-1" },
-    { id: "g4", expeditionId, name: "First Aid & Emergency Shelter Kit", weightGrams: 450, quantity: 1, category: "WORN_GEAR", isPacked: true, addedBy: "u-1" },
-  ];
-
-  const gearList = data?.items ?? mockGear;
+  const gearList = data?.items ?? [];
   const totalWeightGrams = gearList.reduce((acc, item) => acc + item.weightGrams, 0);
+
+  if (gearList.length === 0) {
+    return (
+      <motion.div
+        className="py-12 text-center space-y-2 bg-white border border-gray-100 rounded-3xl p-8 shadow-2xs"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
+        <Backpack size={36} strokeWidth={1} className="text-gray-300 mx-auto" aria-hidden="true" />
+        <p className="text-sm font-semibold text-ink">No gear added yet.</p>
+        <p className="text-xs text-muted-slate max-w-xs mx-auto">
+          Gear items added by expedition members will appear here.
+        </p>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -269,15 +317,25 @@ function PackingTab({ expeditionId }: { expeditionId: string }) {
       </div>
 
       <div className="bg-white border border-gray-100 rounded-3xl p-5 space-y-3 shadow-2xs">
-        <h4 className="text-xs font-semibold text-ink uppercase tracking-wider font-mono">Gear List</h4>
+        <h4 className="text-xs font-semibold text-ink uppercase tracking-wider font-mono">
+          Gear List
+        </h4>
         <div className="divide-y divide-gray-100">
           {gearList.map((item) => (
             <div key={item.id} className="py-3 flex items-center justify-between text-sm">
               <div className="flex items-center gap-3">
-                {item.isPacked ? <CheckCircle size={16} className="text-green-600" /> : <Circle size={16} className="text-gray-300" />}
-                <span className={item.isPacked ? "text-ink font-medium" : "text-gray-500"}>{item.name}</span>
+                {item.isPacked ? (
+                  <CheckCircle size={16} className="text-green-600" />
+                ) : (
+                  <Circle size={16} className="text-gray-300" />
+                )}
+                <span className={item.isPacked ? "text-ink font-medium" : "text-gray-500"}>
+                  {item.name}
+                </span>
               </div>
-              <span className="text-xs font-mono text-muted-slate">{(item.weightGrams / 1000).toFixed(2)} kg</span>
+              <span className="text-xs font-mono text-muted-slate">
+                {(item.weightGrams / 1000).toFixed(2)} kg
+              </span>
             </div>
           ))}
         </div>
@@ -298,7 +356,12 @@ function DiscussionTab() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
     >
-      <MessageSquare size={36} strokeWidth={1} className="text-gray-300 mx-auto" aria-hidden="true" />
+      <MessageSquare
+        size={36}
+        strokeWidth={1}
+        className="text-gray-300 mx-auto"
+        aria-hidden="true"
+      />
       <p className="text-sm font-semibold text-ink">Expedition Discussion</p>
       <p className="text-xs text-muted-slate max-w-xs mx-auto">
         Communicate with your expedition leader and crew prior to departure.
@@ -311,17 +374,57 @@ function DiscussionTab() {
 // Tab: Gallery
 // ---------------------------------------------------------------------------
 
+type GalleryResponse = {
+  expeditionId: string;
+  photos: GalleryPhoto[];
+  totalPhotos: number;
+};
+
 function GalleryTab({ expeditionId }: { expeditionId: string }) {
-  const { data } = useSWR<GalleryPhoto[]>(
+  const { data, isLoading } = useSWR<GalleryResponse>(
     expeditionKeys.gallery(expeditionId),
     swrFetcher,
     { revalidateOnFocus: false }
   );
 
-  const photos: GalleryPhoto[] = data && data.length > 0 ? data : [
-    { id: "p1", expeditionId, imageUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=600&q=80", caption: "Summit Pass", displayOrder: 0, uploadedBy: "u-1", createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" },
-    { id: "p2", expeditionId, imageUrl: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80", caption: "High Valley Lake", displayOrder: 1, uploadedBy: "u-1", createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" },
-  ];
+  const photos: GalleryPhoto[] = data?.photos ?? [];
+
+  if (isLoading) {
+    return (
+      <motion.div
+        className="py-6 grid grid-cols-1 sm:grid-cols-2 gap-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.25 }}
+      >
+        {[1, 2].map((i) => (
+          <div key={i} className="rounded-2xl bg-gray-100 aspect-video animate-pulse" />
+        ))}
+      </motion.div>
+    );
+  }
+
+  if (photos.length === 0) {
+    return (
+      <motion.div
+        className="py-12 text-center space-y-2 bg-white border border-gray-100 rounded-3xl p-8 shadow-2xs"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
+        <ImageOff
+          size={36}
+          strokeWidth={1}
+          className="text-gray-300 mx-auto"
+          aria-hidden="true"
+        />
+        <p className="text-sm font-semibold text-ink">No photos yet.</p>
+        <p className="text-xs text-muted-slate max-w-xs mx-auto">
+          Photos shared by expedition members will appear here.
+        </p>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -331,8 +434,16 @@ function GalleryTab({ expeditionId }: { expeditionId: string }) {
       transition={{ duration: 0.25 }}
     >
       {photos.map((photo) => (
-        <div key={photo.id} className="relative overflow-hidden rounded-2xl bg-gray-100 aspect-video group">
-          <img src={photo.imageUrl} alt={photo.caption ?? ""} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+        <div
+          key={photo.id}
+          className="relative overflow-hidden rounded-2xl bg-gray-100 aspect-video group"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photo.imageUrl}
+            alt={photo.caption ?? ""}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          />
         </div>
       ))}
     </motion.div>
@@ -341,14 +452,110 @@ function GalleryTab({ expeditionId }: { expeditionId: string }) {
 
 // ---------------------------------------------------------------------------
 // Tab: Members
+// Fetches participants, then batch-resolves real user profiles from user-service.
 // ---------------------------------------------------------------------------
 
-function MembersTab({ expedition }: { expedition: Expedition }) {
-  const members = [
-    { name: expedition.organizer?.displayName ?? "Marc Dubois", role: "Organiser", avatar: expedition.organizer?.avatarUrl },
-    { name: "Elena Rostova", role: "Participant", avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80" },
-    { name: "Kenji Sato", role: "Participant", avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=100&q=80" },
-  ];
+function MembersTab({
+  expeditionId,
+  trip,
+}: {
+  expeditionId: string;
+  trip: Trip;
+}) {
+  const { data: participants, isLoading } = useSWR<TripParticipant[]>(
+    expeditionKeys.participants(expeditionId),
+    swrFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  // Real user profiles fetched from user-service via POST /users/batch-profiles
+  const [profileMap, setProfileMap] = useState<ProfileMap>({});
+  const [profilesLoading, setProfilesLoading] = useState(false);
+
+  useEffect(() => {
+    if (!participants || participants.length === 0) return;
+
+    const userIds = participants.map((p) => p.user_id);
+    setProfilesLoading(true);
+    batchProfiles(userIds)
+      .then((map) => setProfileMap(map))
+      .catch(() => {
+        // If user-service is unavailable, degrade gracefully — show neutral fallback
+        setProfileMap({});
+      })
+      .finally(() => setProfilesLoading(false));
+  }, [participants]);
+
+  /** Role display label — matches backend enum values. */
+  function roleLabel(role: TripParticipant["role"]): string {
+    switch (role) {
+      case "ORGANIZER":    return "Organiser";
+      case "CO_ORGANIZER": return "Co-Organiser";
+      default:             return "Participant";
+    }
+  }
+
+  /**
+   * Display name for a participant.
+   *
+   * Resolution order:
+   *   1. displayName from user-service profile (real name the user set)
+   *   2. username from user-service profile (if display_name is empty)
+   *   3. "Member" — neutral fallback when user-service has no record for this ID
+   *
+   * Never derives name from UUID, never shows fake names.
+   */
+  function displayName(participant: TripParticipant): string {
+    const profile = profileMap[participant.user_id];
+    if (profile?.displayName) return profile.displayName;
+    if (profile?.username) return profile.username;
+    return "Member";
+  }
+
+  /**
+   * Avatar URL for a participant.
+   * Returns null when user-service has no avatar — Avatar component handles fallback.
+   */
+  function avatarUrl(participant: TripParticipant): string | null {
+    return profileMap[participant.user_id]?.avatarUrl ?? null;
+  }
+
+  const loading = isLoading || profilesLoading;
+
+  if (loading) {
+    return (
+      <motion.div
+        className="py-6 bg-white border border-gray-100 rounded-3xl p-5 space-y-3 shadow-2xs"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-10 rounded-xl bg-gray-100 animate-pulse" />
+        ))}
+      </motion.div>
+    );
+  }
+
+  const memberList = participants ?? [];
+
+  if (memberList.length === 0) {
+    return (
+      <motion.div
+        className="py-12 text-center space-y-2 bg-white border border-gray-100 rounded-3xl p-8 shadow-2xs"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
+        <Users
+          size={36}
+          strokeWidth={1}
+          className="text-gray-300 mx-auto"
+          aria-hidden="true"
+        />
+        <p className="text-sm font-semibold text-ink">No members yet.</p>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -357,19 +564,149 @@ function MembersTab({ expedition }: { expedition: Expedition }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
     >
-      <h4 className="text-xs font-semibold text-ink uppercase tracking-wider font-mono">Expedition Roster</h4>
+      <h4 className="text-xs font-semibold text-ink uppercase tracking-wider font-mono">
+        Expedition Roster
+        <span className="ml-2 font-normal text-muted-slate normal-case tracking-normal">
+          {memberList.length} / {trip.maxParticipants}
+        </span>
+      </h4>
       <div className="divide-y divide-gray-100">
-        {members.map((m) => (
-          <div key={m.name} className="py-3 flex items-center justify-between">
+        {memberList.map((m) => (
+          <div key={m.id} className="py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Avatar src={m.avatar ?? null} alt={m.name} size="sm" />
-              <span className="text-sm font-medium text-ink">{m.name}</span>
+              <Avatar src={avatarUrl(m)} alt={displayName(m)} size="sm" />
+              <span className="text-sm font-medium text-ink">{displayName(m)}</span>
             </div>
-            <span className="text-xs font-mono text-muted-slate">{m.role}</span>
+            <span className="text-xs font-mono text-muted-slate">{roleLabel(m.role)}</span>
           </div>
         ))}
       </div>
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DeleteTripModal — confirmation dialog before hard-committing deletion
+// ---------------------------------------------------------------------------
+
+interface DeleteTripModalProps {
+  tripTitle: string;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}
+
+function DeleteTripModal({ tripTitle, onConfirm, onClose }: DeleteTripModalProps) {
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await onConfirm();
+      // onConfirm handles navigation — modal stays mounted until parent unmounts
+    } catch {
+      // Error toast shown by caller; re-enable button
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-trip-title"
+    >
+      <div className="relative w-full max-w-sm rounded-2xl bg-white border border-[#EAE7DF] p-6 shadow-xl space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 id="delete-trip-title" className="text-sm font-bold text-[#111111]">
+            Delete Trip
+          </h2>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            onClick={onClose}
+            disabled={deleting}
+            className="text-gray-400 hover:text-[#111111] transition-colors disabled:opacity-50"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm text-gray-700">
+            Are you sure you want to delete{" "}
+            <span className="font-semibold text-[#111111]">
+              &ldquo;{tripTitle}&rdquo;
+            </span>
+            ?
+          </p>
+          <p className="text-xs text-gray-500">
+            This action cannot be undone. All participants will be removed from the trip.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={deleting}
+            className="px-4 py-2 text-xs font-medium text-gray-500 hover:text-[#111111] disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            <Trash2 size={13} aria-hidden="true" />
+            {deleting ? "Deleting…" : "Delete Trip"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loading skeleton
+// ---------------------------------------------------------------------------
+
+function WorkspaceSkeleton() {
+  return (
+    <div className="pb-20 animate-pulse">
+      <div className="container-main pt-6">
+        <div className="h-52 w-full rounded-3xl bg-gray-100" />
+        <div className="mt-5 space-y-3">
+          <div className="h-3 w-24 rounded bg-gray-100" />
+          <div className="h-7 w-3/4 rounded bg-gray-100" />
+          <div className="h-3 w-40 rounded bg-gray-100" />
+        </div>
+      </div>
+      <div className="container-main mt-6">
+        <div className="h-10 w-full rounded-2xl bg-gray-100" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Error state
+// ---------------------------------------------------------------------------
+
+function WorkspaceError({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="container-main pt-12 text-center space-y-3 pb-20">
+      <p className="text-sm font-semibold text-ink">Trip not found.</p>
+      <p className="text-xs text-muted-slate">
+        This trip may have been deleted or the link is incorrect.
+      </p>
+      <Button variant="outline" size="sm" onClick={onBack}>
+        Go Back
+      </Button>
+    </div>
   );
 }
 
@@ -380,59 +717,157 @@ function MembersTab({ expedition }: { expedition: Expedition }) {
 export default function ExpeditionWorkspaceView() {
   const router = useRouter();
   const params = useParams();
+  const { user } = useAuth();
+  const { mutate } = useSWRConfig();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  const expeditionId = (params.id as string) ?? "";
+  const tripId = (params.id as string) ?? "";
 
-  const { data: expeditionResponse } = useSWR<ApiResponse<Expedition>>(
-    expeditionId ? expeditionKeys.byId(expeditionId) : null,
+  // Trip detail
+  const {
+    data: trip,
+    error,
+    isLoading,
+  } = useSWR<Trip>(
+    tripId ? tripKeys.byId(tripId) : null,
     swrFetcher,
     { revalidateOnFocus: false }
   );
 
-  const expedition = expeditionResponse?.data || getFallbackExpedition(expeditionId);
+  // Current user's participant status — fetched from dedicated endpoint.
+  // This determines whether to show Register / Organiser / Registered.
+  const {
+    data: myParticipant,
+    isLoading: isLoadingMyParticipant,
+  } = useSWR<TripParticipant | null>(
+    // Only fetch when trip is loaded and user is authenticated
+    tripId && user ? myParticipantKey(tripId) : null,
+    swrFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  // Only the organizer sees the delete button.
+  // Compare user.id (string UUID from /auth/me) against trip.hostId (string UUID from backend).
+  const isOrganizer = !!user && !!trip && user.id === trip.hostId;
+
+  async function handleDeleteConfirm() {
+    if (!trip) return;
+    await deleteTrip(tripId);
+    // Invalidate all trip-related caches so listings update immediately
+    await Promise.all([
+      mutate(tripKeys.byId(tripId), undefined, { revalidate: false }),
+      mutate(
+        (key) => Array.isArray(key) && key[0] === tripKeys.all()[0],
+        undefined,
+        { revalidate: true },
+      ),
+      mutate(
+        (key) => Array.isArray(key) && key[0] === tripKeys.mine()[0],
+        undefined,
+        { revalidate: true },
+      ),
+    ]);
+    showToast("Trip deleted successfully.", "success");
+    router.push("/trips");
+  }
+
+  async function handleDeleteWithErrorHandling() {
+    try {
+      await handleDeleteConfirm();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 403) {
+          showToast("You are not authorised to delete this trip.", "error");
+        } else if (err.status === 404) {
+          showToast("Trip not found — it may have already been deleted.", "error");
+        } else {
+          showToast("Failed to delete the trip. Please try again.", "error");
+        }
+      } else {
+        showToast("Failed to delete the trip. Please try again.", "error");
+      }
+      // Re-throw so DeleteTripModal can reset its loading state
+      throw err;
+    }
+  }
+
+  if (isLoading && !trip) {
+    return <WorkspaceSkeleton />;
+  }
+
+  if (error || !trip) {
+    return <WorkspaceError onBack={() => router.back()} />;
+  }
 
   return (
-    <motion.div
-      className="pb-20"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
-    >
-      {/* Expedition header */}
-      <div className="container-main pt-6">
-        <ExpeditionHeader expedition={expedition} onBack={() => router.back()} />
-      </div>
-
-      {/* Tabs */}
-      <div className="container-main mt-6">
-        <Tabs
-          tabs={TABS}
-          activeTabId={activeTab}
-          onChange={setActiveTab}
+    <>
+      {/* Delete confirmation dialog — rendered at root so it overlays everything */}
+      {deleteDialogOpen && (
+        <DeleteTripModal
+          tripTitle={trip.title}
+          onConfirm={handleDeleteWithErrorHandling}
+          onClose={() => setDeleteDialogOpen(false)}
         />
-      </div>
+      )}
 
-      {/* Tab content */}
-      <div className="container-main mt-5">
-        <AnimatePresence mode="wait">
-          {activeTab === "overview" && (
-            <OverviewTab key="overview" expedition={expedition} />
+      <motion.div
+        className="pb-20"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0, 0, 0.2, 1] }}
+      >
+        {/* Expedition header + organizer delete action */}
+        <div className="container-main pt-6">
+          <ExpeditionHeader trip={trip} onBack={() => router.back()} />
+
+          {/* Delete Trip button — only visible to organizer */}
+          {isOrganizer && (
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDeleteDialogOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 hover:border-red-300 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                aria-label={`Delete trip: ${trip.title}`}
+              >
+                <Trash2 size={12} aria-hidden="true" />
+                Delete Trip
+              </button>
+            </div>
           )}
-          {activeTab === "discussion" && (
-            <DiscussionTab key="discussion" />
-          )}
-          {activeTab === "packing" && (
-            <PackingTab key="packing" expeditionId={expeditionId} />
-          )}
-          {activeTab === "gallery" && (
-            <GalleryTab key="gallery" expeditionId={expeditionId} />
-          )}
-          {activeTab === "members" && (
-            <MembersTab key="members" expedition={expedition} />
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.div>
+        </div>
+
+        {/* Tabs */}
+        <div className="container-main mt-6">
+          <Tabs tabs={TABS} activeTabId={activeTab} onChange={setActiveTab} />
+        </div>
+
+        {/* Tab content */}
+        <div className="container-main mt-5">
+          <AnimatePresence mode="wait">
+            {activeTab === "overview" && (
+              <OverviewTab
+                key="overview"
+                trip={trip}
+                tripId={tripId}
+                myParticipant={myParticipant ?? null}
+                isLoadingMyParticipant={isLoadingMyParticipant}
+              />
+            )}
+            {activeTab === "discussion" && <DiscussionTab key="discussion" />}
+            {activeTab === "packing" && (
+              <PackingTab key="packing" expeditionId={tripId} />
+            )}
+            {activeTab === "gallery" && (
+              <GalleryTab key="gallery" expeditionId={tripId} />
+            )}
+            {activeTab === "members" && (
+              <MembersTab key="members" expeditionId={tripId} trip={trip} />
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </>
   );
 }

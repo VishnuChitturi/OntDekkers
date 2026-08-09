@@ -10,6 +10,7 @@ Provides the trip-centric API surface required by MCP-1:
   POST   /api/v1/trips/{id}/join
   POST   /api/v1/trips/{id}/leave
   GET    /api/v1/users/me/trips
+  GET    /api/v1/trips/{id}/me/participant
 """
 
 from __future__ import annotations
@@ -21,11 +22,13 @@ from fastapi import APIRouter, Depends, Header, Query, status
 
 from shared.dependencies import get_current_user
 
-from app.dependencies.expedition_deps import get_trip_service
+from app.dependencies.expedition_deps import get_trip_service, get_participant_repository
 from app.models.expedition import ExpeditionStatus
 from app.schemas.common import PaginatedResponse
 from app.schemas.trip import TripCreate, TripFilter, TripResponse, TripSummary, TripUpdate
+from app.schemas.participant import ParticipantResponse
 from app.services.trip_service import TripService
+from app.repositories.participant_repository import ParticipantRepository
 
 router = APIRouter(tags=["Trips"])
 
@@ -192,3 +195,30 @@ async def my_trips(
 ) -> PaginatedResponse[TripSummary]:
     user_id = UUID(current_user["sub"])
     return await service.list_my_trips(user_id, status=status_filter, page=page, page_size=page_size)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/trips/{trip_id}/me/participant
+# Returns the current user's participant record for this trip, or 204 if not a member.
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/api/v1/trips/{trip_id}/me/participant",
+    response_model=Optional[ParticipantResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Current user's participant status for a trip",
+    description=(
+        "Returns the authenticated user's participant record (role + status) for the trip. "
+        "Returns null if the user is not a participant. Never raises 404 for non-membership."
+    ),
+)
+async def get_my_participant_status(
+    trip_id: UUID,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    participant_repo: ParticipantRepository = Depends(get_participant_repository),
+) -> Optional[ParticipantResponse]:
+    user_id = UUID(current_user["sub"])
+    participant = await participant_repo.get_by_expedition_and_user(trip_id, user_id)
+    if participant is None:
+        return None
+    return ParticipantResponse.model_validate(participant)

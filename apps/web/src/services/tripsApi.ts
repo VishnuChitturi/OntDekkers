@@ -20,6 +20,7 @@ import type { PaginatedResponse } from "@/types";
 import type {
   Trip,
   TripSummary,
+  TripParticipant,
   CreateTripRequest,
   UpdateTripRequest,
   TripListParams,
@@ -130,4 +131,40 @@ export async function getMyTrips(
     { params },
   );
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// PARTICIPANTS
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the participant list for a trip.
+ *
+ * The expedition-service stores trips and participants in the same database.
+ * The trip ID is the same as the expedition ID, so participants are still
+ * fetched from /expeditions/api/v1/expeditions/{id}/participants.
+ */
+export async function getTripParticipants(tripId: string): Promise<TripParticipant[]> {
+  const { data } = await apiClient.get<TripParticipant[]>(
+    `/expeditions/api/v1/expeditions/${tripId}/participants`,
+  );
+  return data;
+}
+
+/**
+ * Fetch the current authenticated user's participant record for a trip.
+ *
+ * Returns null if the user is not a participant (not registered, not organizer).
+ * Returns a TripParticipant with role=ORGANIZER if the user created the trip.
+ * Returns a TripParticipant with role=PARTICIPANT if the user has joined.
+ *
+ * Uses GET /api/v1/trips/{id}/me/participant — never throws 404 for non-membership.
+ */
+export async function getMyParticipantStatus(
+  tripId: string,
+): Promise<TripParticipant | null> {
+  const { data } = await apiClient.get<TripParticipant | null>(
+    `/api/v1/trips/${tripId}/me/participant`,
+  );
+  return data ?? null;
 }

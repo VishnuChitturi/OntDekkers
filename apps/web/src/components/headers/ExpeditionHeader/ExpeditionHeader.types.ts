@@ -1,6 +1,6 @@
-import type { Expedition } from "@/types";
+import type { Trip } from "@/types/trip";
 
 export interface ExpeditionHeaderProps {
-  expedition: Expedition;
+  trip: Trip;
   onBack: () => void;
 }

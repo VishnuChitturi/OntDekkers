@@ -5,27 +5,27 @@
  *
  * Top section of the Expedition Workspace.
  *
- * Information displayed (per 05-component-library.md § Expedition Header):
+ * Information displayed:
  *   - Cover image (full-width hero)
- *   - Back button (calls onBack prop — caller uses router.back())
+ *   - Back button
  *   - Title
  *   - Destination
  *   - Status badge
  *   - Dates (mono)
  *   - Budget (mono)
- *   - Organiser avatar + name
+ *   - Host name (plain string — organizer object not yet available)
+ *   - Description
  */
 
 import React from "react";
 import { motion } from "motion/react";
-import { ArrowLeft, CalendarDays, Wallet, MapPin } from "lucide-react";
-import Avatar from "@/components/feedback/Avatar";
+import { ArrowLeft, CalendarDays, Wallet, MapPin, User } from "lucide-react";
 import Badge from "@/components/feedback/Badge";
 import type { BadgeVariant } from "@/components/feedback/Badge";
 import type { ExpeditionHeaderProps } from "./ExpeditionHeader.types";
-import type { ExpeditionStatus } from "@/types";
+import type { TripStatus } from "@/types/trip";
 
-const STATUS_CONFIG: Record<ExpeditionStatus, { variant: BadgeVariant; label: string }> = {
+const STATUS_CONFIG: Record<TripStatus, { variant: BadgeVariant; label: string }> = {
   DRAFT:     { variant: "default",  label: "Draft" },
   PUBLISHED: { variant: "info",     label: "Open" },
   ACTIVE:    { variant: "success",  label: "Active" },
@@ -43,8 +43,8 @@ function formatDate(iso: string | null): string {
   });
 }
 
-export default function ExpeditionHeader({ expedition, onBack }: ExpeditionHeaderProps) {
-  const statusCfg = STATUS_CONFIG[expedition.status];
+export default function ExpeditionHeader({ trip, onBack }: ExpeditionHeaderProps) {
+  const statusCfg = STATUS_CONFIG[trip.status];
 
   return (
     <motion.div
@@ -55,11 +55,11 @@ export default function ExpeditionHeader({ expedition, onBack }: ExpeditionHeade
     >
       {/* Cover image */}
       <div className="h-52 w-full overflow-hidden bg-gray-100 rounded-3xl relative">
-        {expedition.coverImageUrl ? (
+        {trip.coverImageUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
-            src={expedition.coverImageUrl}
-            alt={expedition.destination}
+            src={trip.coverImageUrl}
+            alt={trip.destination}
             className="w-full h-full object-cover"
             loading="lazy"
           />
@@ -101,48 +101,44 @@ export default function ExpeditionHeader({ expedition, onBack }: ExpeditionHeade
         {/* Destination */}
         <p className="text-[10px] font-mono uppercase tracking-wider text-muted-slate flex items-center gap-1">
           <MapPin size={10} strokeWidth={2} aria-hidden="true" />
-          {expedition.destination}
+          {trip.destination}
         </p>
 
         {/* Title */}
         <h1 className="text-2xl font-bold tracking-tight text-ink leading-snug">
-          {expedition.title}
+          {trip.title}
         </h1>
 
         {/* Meta row — dates + budget */}
         <div className="flex items-center gap-5 flex-wrap text-[10px] font-mono uppercase tracking-wider text-muted-slate">
           <span className="flex items-center gap-1.5">
             <CalendarDays size={11} strokeWidth={2} aria-hidden="true" />
-            {formatDate(expedition.startDate)}
-            {expedition.endDate && ` — ${formatDate(expedition.endDate)}`}
+            {formatDate(trip.startDate)}
+            {trip.endDate && ` — ${formatDate(trip.endDate)}`}
           </span>
-          {expedition.budget !== null && (
+          {trip.budget !== null && (
             <span className="flex items-center gap-1.5">
               <Wallet size={11} strokeWidth={2} aria-hidden="true" />
-              ${expedition.budget.toLocaleString()} budget
+              ${Number(trip.budget).toLocaleString()} budget
             </span>
           )}
         </div>
 
-        {/* Organiser */}
-        {expedition.organizer && (
+        {/* Host name — plain string only; avatar not available until user-service integration */}
+        {trip.hostName && (
           <div className="flex items-center gap-2">
-            <Avatar
-              src={expedition.organizer.avatarUrl}
-              alt={expedition.organizer.displayName}
-              size="xs"
-            />
+            <User size={14} strokeWidth={1.5} className="text-muted-slate" aria-hidden="true" />
             <span className="text-xs text-charcoal">
-              <span className="text-muted-slate">Organised by </span>
-              <span className="font-medium">{expedition.organizer.displayName}</span>
+              <span className="text-muted-slate">Hosted by </span>
+              <span className="font-medium">{trip.hostName}</span>
             </span>
           </div>
         )}
 
         {/* Description */}
-        {expedition.description && (
+        {trip.description && (
           <p className="text-sm text-charcoal leading-relaxed max-w-2xl">
-            {expedition.description}
+            {trip.description}
           </p>
         )}
       </div>
