@@ -268,6 +268,7 @@ class PostQueryParams(BaseModel):
     limit: int = Field(default=20, ge=1, le=100, description="Number of posts to return")
     offset: int = Field(default=0, ge=0, description="Number of posts to skip")
     author_id: Optional[uuid.UUID] = Field(None, description="Filter by author")
+    exclude_author_id: Optional[uuid.UUID] = Field(None, description="Exclude posts by this author (used for own-post exclusion in main feed)")
     community_id: Optional[uuid.UUID] = Field(None, description="Filter by community")
     expedition_id: Optional[uuid.UUID] = Field(None, description="Filter by expedition")
     tags: Optional[str] = Field(None, description="Comma-separated list of tags to filter by")

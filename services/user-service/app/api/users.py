@@ -36,6 +36,7 @@ from app.dependencies.user import get_current_user_payload, get_optional_current
 from app.schemas.user import (
     BadgeResponse,
     BatchProfilesRequest,
+    BatchProfilesByAuthRequest,
     BatchProfilesResponse,
     MediaUploadResponse,
     MessageResponse,
@@ -244,6 +245,31 @@ async def batch_profiles(
     This endpoint is unauthenticated — it only returns public-facing fields.
     """
     return await svc.batch_profiles(body.user_ids)
+
+
+@router.post(
+    "/batch-profiles-by-auth",
+    response_model=BatchProfilesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def batch_profiles_by_auth(
+    body: BatchProfilesByAuthRequest,
+    svc: UserService = Depends(get_user_service),
+) -> BatchProfilesResponse:
+    """
+    Return minimal profile summaries resolved by auth-service user IDs.
+
+    Feed posts, community memberships, and other microservices store the JWT
+    sub claim (auth-service UUID) as their author/user reference, not the
+    user-service profile UUID.  Use this endpoint when you have auth UUIDs
+    and need the real display identity (username, display_name, avatar_url).
+
+    The BatchProfileSummary.id in the response is the auth_user_id so callers
+    can look up post.authorId → profile directly.
+
+    Accepts up to 200 IDs per request.  Unauthenticated — public fields only.
+    """
+    return await svc.batch_profiles_by_auth(body.auth_user_ids)
 
 
 @router.get(

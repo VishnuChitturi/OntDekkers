@@ -218,7 +218,7 @@ function PublicProfileView({
       {/* Cover + avatar header */}
       <div className="relative">
         {/* Cover image */}
-        <div className="h-36 overflow-hidden rounded-xl bg-[#EAE7DF]">
+        <div className="relative h-36 overflow-hidden rounded-xl bg-[#EAE7DF]">
           {profile.cover_url ? (
             <Image
               src={profile.cover_url}

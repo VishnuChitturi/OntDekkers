@@ -4,13 +4,20 @@
  * StoryComposer — Create Story Form Component
  *
  * Supports:
- *  - Text fields: title, content, location, community
+ *  - Visibility toggle: Global (PUBLIC) / Community (COMMUNITY)
+ *  - Community selector: populated from the user's real memberships only
+ *  - Text fields: title, content, location
  *  - Image selection: multi-file picker (jpeg, png, webp, heic)
  *  - Local previews before publishing
  *  - Remove individual images before publishing
  *  - After create: presign → PUT to MinIO → register, per image
  *  - Per-image upload progress bar
  *  - Graceful per-image error messages
+ *  - SWR feed revalidation on successful creation (text-only and with images)
+ *
+ * Visibility semantics (match backend PostVisibility enum):
+ *   "GLOBAL"    → sent as visibility="PUBLIC", community_id=null
+ *   "COMMUNITY" → sent as visibility="COMMUNITY", community_id=<selected>
  *
  * Upload orchestration (FC-2.3 backend workflow):
  *  1. createPost()                          → receives post_id
@@ -21,9 +28,9 @@
  */
 
 import React, { useRef, useState, useCallback } from "react";
-import { Send, ImagePlus, X, AlertCircle } from "lucide-react";
+import { Send, ImagePlus, X, AlertCircle, Globe, Users } from "lucide-react";
 import { generateMediaUploadUrl, uploadFileToMinIO, registerPostMedia } from "@/services/feedApi";
-import type { CreatePostRequest } from "@/types";
+import type { CreatePostRequest, PostVisibility } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -41,10 +48,18 @@ interface SelectedImage {
   error: string | null;
 }
 
+/**
+ * UI-level visibility choice.
+ * "GLOBAL" maps to PostVisibility "PUBLIC" on the backend.
+ * "COMMUNITY" maps to PostVisibility "COMMUNITY" on the backend.
+ */
+type VisibilityChoice = "GLOBAL" | "COMMUNITY";
+
 interface StoryComposerProps {
   user: { email: string; id: string } | null;
   onSubmit: (payload: CreatePostRequest) => Promise<string>;
   onUploadComplete: () => Promise<void>;
+  /** Communities where the current user is an active member (from real API) */
   communities: { id: string; name: string }[];
 }
 
@@ -70,7 +85,11 @@ export function StoryComposer({
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [location, setLocation] = useState("");
-  const [communityId, setCommunityId] = useState("");
+
+  // Visibility choice — defaults to GLOBAL (public feed)
+  const [visibilityChoice, setVisibilityChoice] = useState<VisibilityChoice>("GLOBAL");
+  const [selectedCommunityId, setSelectedCommunityId] = useState("");
+
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -87,7 +106,6 @@ export function StoryComposer({
     const invalid = files.filter((f) => !ALLOWED_TYPES.includes(f.type));
 
     if (invalid.length > 0) {
-      // Silently ignore unsupported types — could surface a toast if needed
       console.warn("Unsupported file type(s) ignored:", invalid.map((f) => f.name));
     }
 
@@ -150,14 +168,34 @@ export function StoryComposer({
     [],
   );
 
+  // ── Visibility change handler ─────────────────────────────────────────────
+
+  function handleVisibilityChange(choice: VisibilityChoice) {
+    setVisibilityChoice(choice);
+    // Reset community selection when switching back to GLOBAL
+    if (choice === "GLOBAL") {
+      setSelectedCommunityId("");
+    }
+  }
+
   // ── Form submit ──────────────────────────────────────────────────────────
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() && !content.trim()) return;
 
+    // Validate community selection when COMMUNITY visibility is chosen
+    if (visibilityChoice === "COMMUNITY" && !selectedCommunityId) {
+      // Form validation will surface this — do not proceed
+      return;
+    }
+
     setSubmitting(true);
     let postId: string;
+
+    // Map UI choice to backend PostVisibility value
+    const backendVisibility: PostVisibility =
+      visibilityChoice === "COMMUNITY" ? "COMMUNITY" : "PUBLIC";
 
     try {
       // Step 1 — create the post
@@ -165,13 +203,13 @@ export function StoryComposer({
         title: title.trim() || "Travel Note",
         content: content.trim(),
         location: location.trim() || null,
-        visibility: "PUBLIC",
-        communityId: communityId || null,
+        visibility: backendVisibility,
+        communityId: visibilityChoice === "COMMUNITY" ? selectedCommunityId : null,
         tags: [],
       });
     } catch {
       setSubmitting(false);
-      return; // onSubmit shows the toast
+      return; // onSubmit shows the toast and calls mutate() on success
     }
 
     // If there are images, upload them all sequentially
@@ -205,7 +243,8 @@ export function StoryComposer({
     setTitle("");
     setContent("");
     setLocation("");
-    setCommunityId("");
+    setVisibilityChoice("GLOBAL");
+    setSelectedCommunityId("");
     setSelectedImages([]);
     setOpen(false);
     setSubmitting(false);
@@ -220,7 +259,8 @@ export function StoryComposer({
     setTitle("");
     setContent("");
     setLocation("");
-    setCommunityId("");
+    setVisibilityChoice("GLOBAL");
+    setSelectedCommunityId("");
     setOpen(false);
   }
 
@@ -229,6 +269,9 @@ export function StoryComposer({
   const isWorking = submitting || uploadingImages;
   const hasContent = title.trim().length > 0 || content.trim().length > 0;
   const anyFailed = selectedImages.some((img) => img.error !== null);
+  const communityRequired = visibilityChoice === "COMMUNITY";
+  const communityMissing = communityRequired && !selectedCommunityId;
+  const canSubmit = hasContent && !anyFailed && !communityMissing;
 
   return (
     <div className="rounded-2xl border border-[#EAE7DF] bg-white p-5 space-y-4 shadow-2xs">
@@ -252,6 +295,64 @@ export function StoryComposer({
           onSubmit={handleSubmit}
           className="space-y-4 pt-2 border-t border-[#EAE7DF]"
         >
+          {/* ── Visibility Toggle ────────────────────────────────────────── */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-500 mr-1">Post to:</span>
+            <button
+              type="button"
+              onClick={() => handleVisibilityChange("GLOBAL")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                visibilityChoice === "GLOBAL"
+                  ? "bg-[#111111] text-white"
+                  : "bg-white border border-[#EAE7DF] text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <Globe size={12} />
+              Global
+            </button>
+            <button
+              type="button"
+              onClick={() => handleVisibilityChange("COMMUNITY")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                visibilityChoice === "COMMUNITY"
+                  ? "bg-[#111111] text-white"
+                  : "bg-white border border-[#EAE7DF] text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <Users size={12} />
+              Community
+            </button>
+          </div>
+
+          {/* ── Community Selector (only shown when COMMUNITY is selected) ── */}
+          {visibilityChoice === "COMMUNITY" && (
+            <div className="space-y-1.5">
+              {communities.length === 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    You are not a member of any community yet. Join a community
+                    first to post there.
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={selectedCommunityId}
+                  onChange={(e) => setSelectedCommunityId(e.target.value)}
+                  required={communityRequired}
+                  className="w-full rounded-xl border border-[#EAE7DF] bg-white px-3.5 py-2 text-sm text-gray-700 outline-none focus:border-[#111111]"
+                >
+                  <option value="">— Select a community —</option>
+                  {communities.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
           {/* Title */}
           <input
             type="text"
@@ -359,20 +460,6 @@ export function StoryComposer({
           {/* Bottom bar */}
           <div className="flex items-center justify-between pt-2">
             <div className="flex items-center gap-2">
-              {/* Community picker */}
-              <select
-                value={communityId}
-                onChange={(e) => setCommunityId(e.target.value)}
-                className="rounded-xl border border-[#EAE7DF] bg-white px-3 py-1.5 text-xs text-gray-700 outline-none"
-              >
-                <option value="">Public Feed (No Community)</option>
-                {communities.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-
               {/* Add Photos button */}
               {!isWorking && selectedImages.length < MAX_IMAGES && (
                 <button
@@ -409,7 +496,7 @@ export function StoryComposer({
               </button>
               <button
                 type="submit"
-                disabled={isWorking || !hasContent || anyFailed}
+                disabled={isWorking || !canSubmit}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-[#111111] px-4 py-2 text-xs font-semibold text-white hover:bg-[#333333] transition-colors disabled:opacity-50"
               >
                 <Send size={13} />
@@ -421,6 +508,14 @@ export function StoryComposer({
               </button>
             </div>
           </div>
+
+          {/* Community required hint */}
+          {communityRequired && communityMissing && communities.length > 0 && (
+            <p className="text-xs text-amber-600 flex items-center gap-1.5">
+              <AlertCircle size={12} />
+              Please select a community before publishing.
+            </p>
+          )}
 
           {/* Failed uploads hint */}
           {anyFailed && (

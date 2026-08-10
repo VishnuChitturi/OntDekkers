@@ -187,11 +187,20 @@ class PostRepository:
     async def list_posts(
         self,
         params: PostQueryParams,
-        current_user_id: Optional[uuid.UUID] = None
+        current_user_id: Optional[uuid.UUID] = None,
+        user_community_ids: Optional[List[uuid.UUID]] = None,
     ) -> Tuple[List[Post], int]:
         """
         List posts with filtering, pagination, and total count.
         Returns (posts, total_count) tuple.
+
+        Args:
+            params: Query parameters (filters, pagination).
+            current_user_id: The authenticated user's ID, used for visibility rules.
+            user_community_ids: List of community IDs the current user belongs to.
+                Used to enforce community-post visibility — only posts from those
+                communities are returned.  If None, community membership is not
+                enforced (anonymous feed shows PUBLIC posts only).
         """
         
         # Base query
@@ -204,7 +213,9 @@ class PostRepository:
         count_query = select(func.count(Post.id)).where(Post.is_deleted == False)
         
         # Apply filters
-        query, count_query = self._apply_filters(query, count_query, params, current_user_id)
+        query, count_query = self._apply_filters(
+            query, count_query, params, current_user_id, user_community_ids
+        )
         
         # Apply ordering (chronological by default)
         query = query.order_by(desc(Post.created_at))
@@ -422,47 +433,122 @@ class PostRepository:
         query, 
         count_query, 
         params: PostQueryParams,
-        current_user_id: Optional[uuid.UUID] = None
+        current_user_id: Optional[uuid.UUID] = None,
+        user_community_ids: Optional[List[uuid.UUID]] = None,
     ) -> Tuple[Any, Any]:
-        """Apply filtering logic to both main and count queries"""
-        
-        # Author filter
+        """Apply filtering logic to both main and count queries.
+
+        Visibility enforcement (applied when no explicit visibility filter given):
+          - Anonymous (current_user_id=None):
+              Only PUBLIC posts are visible.
+          - Authenticated (current_user_id set) — main feed mode:
+              PUBLIC posts from other authors are visible.
+              COMMUNITY posts from communities the user belongs to are visible.
+              Own COMMUNITY posts are excluded by the exclude_author_id filter.
+              PRIVATE posts are never returned in the general feed (only via
+              get_post() or get_posts_by_author() which have their own logic).
+
+        The explicit ``params.visibility`` filter can narrow this further (e.g.,
+        community_id + COMMUNITY for a community-scoped feed request).
+        """
+
+        # ── Own-post exclusion (exclude_author_id) ──────────────────────────
+        # Applied first so it's always enforced regardless of other filters.
+        # This ensures the JWT-derived current_user_id can never be overridden
+        # by the caller passing a different exclude_author_id.
+        if params.exclude_author_id:
+            filter_cond = Post.author_id != params.exclude_author_id
+            query = query.where(filter_cond)
+            count_query = count_query.where(filter_cond)
+
+        # ── Author filter ────────────────────────────────────────────────────
         if params.author_id:
             filter_cond = Post.author_id == params.author_id
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Community filter
+        # ── Community filter ─────────────────────────────────────────────────
         if params.community_id:
             filter_cond = Post.community_id == params.community_id
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Expedition filter
+        # ── Expedition filter ────────────────────────────────────────────────
         if params.expedition_id:
             filter_cond = Post.expedition_id == params.expedition_id
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Status filter
+        # ── Status filter ────────────────────────────────────────────────────
         if params.status:
             filter_cond = Post.status == params.status
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Visibility filter
+        # ── Visibility filter ────────────────────────────────────────────────
+        # If an explicit visibility is requested, apply it directly.
+        # Otherwise, enforce the feed visibility rules based on auth state.
         if params.visibility:
             filter_cond = Post.visibility == params.visibility
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
+        elif params.community_id:
+            # Scoped community feed (params.community_id explicitly set).
+            # The caller has already filtered by a specific community; the
+            # community-detail page validates membership separately before
+            # rendering this feed.  We only enforce PUBLISHED status here —
+            # not the main-feed membership-based visibility rules — so that
+            # community posts are visible to the scoped caller.
+            published_cond = Post.status == PostStatus.PUBLISHED
+            query = query.where(published_cond)
+            count_query = count_query.where(published_cond)
+        else:
+            # Default main-feed visibility enforcement:
+            # - Always show only PUBLISHED posts
+            # - Anonymous: only PUBLIC posts
+            # - Authenticated: PUBLIC posts + COMMUNITY posts from joined communities
+            published_cond = Post.status == PostStatus.PUBLISHED
+
+            if current_user_id is None:
+                # Anonymous users: only see PUBLIC posts
+                vis_cond = and_(
+                    published_cond,
+                    Post.visibility == PostVisibility.PUBLIC,
+                )
+            else:
+                # Authenticated users: PUBLIC posts always visible.
+                # COMMUNITY posts: only if user_community_ids is provided and
+                # the post's community_id is in that set.
+                # PRIVATE posts: never in the general feed.
+                if user_community_ids:
+                    vis_cond = and_(
+                        published_cond,
+                        or_(
+                            Post.visibility == PostVisibility.PUBLIC,
+                            and_(
+                                Post.visibility == PostVisibility.COMMUNITY,
+                                Post.community_id.in_(user_community_ids),
+                            ),
+                        ),
+                    )
+                else:
+                    # Authenticated but no community memberships (or membership
+                    # fetch was skipped) — show PUBLIC posts only.
+                    vis_cond = and_(
+                        published_cond,
+                        Post.visibility == PostVisibility.PUBLIC,
+                    )
+
+            query = query.where(vis_cond)
+            count_query = count_query.where(vis_cond)
         
-        # Location filter (partial match)
+        # ── Location filter (partial match) ──────────────────────────────────
         if params.location:
             filter_cond = Post.location.ilike(f'%{params.location}%')
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Date range filters
+        # ── Date range filters ────────────────────────────────────────────────
         if params.since:
             filter_cond = Post.created_at >= params.since
             query = query.where(filter_cond)
@@ -473,7 +559,7 @@ class PostRepository:
             query = query.where(filter_cond)
             count_query = count_query.where(filter_cond)
         
-        # Tags filter
+        # ── Tags filter ───────────────────────────────────────────────────────
         if params.tags:
             tag_list = [tag.strip().lower() for tag in params.tags.split(',') if tag.strip()]
             if tag_list:

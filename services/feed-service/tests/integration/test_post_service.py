@@ -96,6 +96,34 @@ async def test_create_post_raises_validation_error_for_community_private(db_sess
 
 
 @pytest.mark.integration
+async def test_create_post_raises_validation_error_for_public_with_community_id(db_session):
+    """create_post() raises ValidationError when PUBLIC visibility + community_id is set."""
+    svc = _svc(db_session)
+    req = PostCreateRequest(
+        title="Bad PUBLIC combo",
+        community_id=uuid.uuid4(),
+        visibility=PostVisibility.PUBLIC,
+    )
+
+    with pytest.raises(ValidationError):
+        await svc.create_post(req, uuid.uuid4())
+
+
+@pytest.mark.integration
+async def test_create_post_raises_validation_error_for_community_without_community_id(db_session):
+    """create_post() raises ValidationError when COMMUNITY visibility + no community_id."""
+    svc = _svc(db_session)
+    req = PostCreateRequest(
+        title="No community given",
+        community_id=None,
+        visibility=PostVisibility.COMMUNITY,
+    )
+
+    with pytest.raises(ValidationError):
+        await svc.create_post(req, uuid.uuid4())
+
+
+@pytest.mark.integration
 async def test_create_post_interaction_counts_start_at_zero(db_session):
     """Newly created post has like_count, share_count, comment_count all zero."""
     svc = _svc(db_session)

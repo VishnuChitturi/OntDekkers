@@ -136,10 +136,14 @@ async def app(db_engine: AsyncEngine):
     1. ``get_db`` → yields an AsyncSession backed by the in-memory engine.
     2. ``app.state.db_sessionmaker`` is set so the production get_db path also
        resolves to the test engine.
+    3. ``_verify_community_membership`` is patched to return True so tests that
+       create COMMUNITY-visibility posts do not need a running community-service.
 
     Overrides are cleaned up after the test completes.
     """
+    from unittest.mock import patch, AsyncMock
     from app.core.main import app as fastapi_app
+    from app.services.post_service import PostService
     from shared.dependencies import get_db
 
     test_sessionmaker = async_sessionmaker(
@@ -163,7 +167,22 @@ async def app(db_engine: AsyncEngine):
     # Also patch app.state so the lifespan-injected path resolves correctly.
     fastapi_app.state.db_sessionmaker = test_sessionmaker
 
-    yield fastapi_app
+    # Patch _verify_community_membership so COMMUNITY posts pass membership
+    # checks without a real community-service running in the test environment.
+    # Also patch _fetch_user_community_ids so list_posts() does not attempt an
+    # HTTP call to community-service; returning an empty list is safe because
+    # endpoint tests that need community-scoped visibility supply community_id
+    # as an explicit query param (scoped feed path) which bypasses the
+    # membership enforcement logic.
+    with patch(
+        "app.services.post_service._verify_community_membership",
+        new=AsyncMock(return_value=True),
+    ), patch.object(
+        PostService,
+        "_fetch_user_community_ids",
+        new=AsyncMock(return_value=[]),
+    ):
+        yield fastapi_app
 
     # Teardown — remove all overrides added during this test.
     fastapi_app.dependency_overrides.pop(get_db, None)

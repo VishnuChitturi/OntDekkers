@@ -407,3 +407,33 @@ export async function cancelJoinRequest(requestId: string): Promise<void> {
     `/communities/api/v1/communities/join-requests/${requestId}/cancel`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// My Memberships — communities the authenticated user has joined
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all communities where the currently authenticated user is an active
+ * member (isMember === true).
+ *
+ * Uses the existing list endpoint with a high limit and filters client-side
+ * since the backend does not have a dedicated "my communities" endpoint.
+ *
+ * Returns a lightweight array of CommunitySummary objects suitable for
+ * use in community selectors (e.g., the post composer).
+ *
+ * GET /communities/api/v1/communities?limit=200
+ */
+export async function getMyMemberships(): Promise<CommunitySummary[]> {
+  // Fetch up to 200 communities and filter to those where isMember is true.
+  // The backend sets isMember based on the authenticated user from the JWT,
+  // so this call must be made while the user is authenticated.
+  const { data } = await apiClient.get("/communities/api/v1/communities", {
+    params: { limit: 200, offset: 0 },
+  });
+
+  // The axios response interceptor converts snake_case → camelCase, so
+  // is_member → isMember is already handled.
+  const page = data as CommunitiesPage;
+  return (page.communities ?? []).filter((c) => c.isMember === true);
+}

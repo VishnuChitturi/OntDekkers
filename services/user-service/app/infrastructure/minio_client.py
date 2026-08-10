@@ -119,6 +119,12 @@ async def presigned_url(object_name: str, expires_hours: int = 1) -> str:
     Generate a pre-signed GET URL for a private object.
 
     The URL is valid for `expires_hours` hours.
+
+    If MINIO_PUBLIC_URL is set, the internal Docker hostname in the presigned
+    URL is replaced with the browser-accessible host so that the browser can
+    actually load the image.  Without this, the URL contains "minio:9000"
+    which resolves only inside the Docker network, not in the user's browser.
+
     The URL is not logged (it grants temporary access to private content).
     """
     client = get_raw_client()
@@ -133,6 +139,21 @@ async def presigned_url(object_name: str, expires_hours: int = 1) -> str:
         )
 
     url = await asyncio.to_thread(_presign)
+
+    # Rewrite the internal Docker hostname to the browser-accessible public URL
+    # so that the frontend can actually load the image.
+    if settings.MINIO_PUBLIC_URL:
+        # Replace the scheme+host portion that the Minio SDK used (MINIO_ENDPOINT)
+        # with the public URL. We handle both http and https.
+        internal_endpoint = settings.MINIO_ENDPOINT
+        public_endpoint = settings.MINIO_PUBLIC_URL
+        # Build the full scheme://host for both sides
+        scheme = "https" if settings.MINIO_USE_SSL else "http"
+        internal_prefix = f"{scheme}://{internal_endpoint}"
+        public_prefix = f"{scheme}://{public_endpoint}"
+        if url.startswith(internal_prefix):
+            url = public_prefix + url[len(internal_prefix):]
+
     return url
 
 

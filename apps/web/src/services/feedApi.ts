@@ -28,6 +28,7 @@ import type {
   MediaUploadResponse,
   RegisterMediaRequest,
 } from "@/types";
+import type { RawPostListResponse } from "@/views/Feed/types";
 
 // ---------------------------------------------------------------------------
 // Posts (Travel Stories)
@@ -58,6 +59,20 @@ export async function getPostsByUser(
     `/feed/api/v1/feed/users/${userId}`,
     { params },
   );
+  return data;
+}
+
+/**
+ * Fetch the currently authenticated user's own posts.
+ *
+ * Author identity is derived from the JWT on the server — the caller never
+ * supplies an author_id.  Returns all PUBLISHED posts (Global + Community)
+ * created by the current user for display on their Profile.
+ */
+export async function getMyPosts(
+  params: { limit?: number; offset?: number } = {},
+): Promise<RawPostListResponse> {
+  const { data } = await apiClient.get("/feed/api/v1/feed/me/posts", { params });
   return data;
 }
 

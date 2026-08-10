@@ -13,9 +13,10 @@
  *   - Feed Toggle (All Stories vs Communities)
  *   - Live search across title, location, tags
  *   - Right Sidebar: Trending Communities, Upcoming Expeditions
+ *   - Real author identity resolved via batch-profiles-by-auth (CP-FEED-IDENTITY-1)
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import useSWR from "swr";
 import { AnimatePresence } from "motion/react";
 import {
@@ -36,9 +37,11 @@ import {
   expeditionKeys,
 } from "@/services/cache";
 import { createPost, updatePost, deletePost } from "@/services/feedApi";
-import { joinCommunity } from "@/services/communityApi";
+import { joinCommunity, getMyMemberships } from "@/services/communityApi";
+import { batchProfilesByAuth, type ProfileMap } from "@/services/users";
 import { useToast } from "@/hooks/useToast";
 import { useAuth } from "@/contexts/AuthContext";
+import { queryClient } from "@/lib/query";
 import type { CommunitySummary, ExpeditionSummary, CreatePostRequest, UpdatePostRequest } from "@/types";
 
 import { StoryComposer } from "./StoryComposer";
@@ -62,6 +65,9 @@ export default function FeedView() {
   // Interactive sidebar state
   const [joinedCommunities, setJoinedCommunities] = useState<Set<string>>(new Set());
 
+  // Author profile resolution — keyed by auth_user_id (= post.authorId)
+  const [authorProfiles, setAuthorProfiles] = useState<ProfileMap>({});
+
   // ── SWR: Feed Posts ──────────────────────────────────────────────────────
   const { data, mutate, isLoading } = useSWR<RawPostListResponse>(
     feedKeys.list({ limit: 18 }),
@@ -78,6 +84,18 @@ export default function FeedView() {
     { revalidateOnFocus: false }
   );
 
+  // ── SWR: User's Memberships (for the post composer community selector) ───
+  // Only fetch when the user is authenticated.  We pass the raw communities
+  // list key with a high limit and filter client-side to isMember === true.
+  const { data: membershipsData } = useSWR<{ communities: CommunitySummary[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+    user
+      ? communityKeys.list({ limit: 200, offset: 0 })
+      : null,
+    ([url, params]: [string, Record<string, unknown>]) =>
+      swrFetcherWithParams(url, params),
+    { revalidateOnFocus: false }
+  );
+
   // ── SWR: Upcoming Expeditions ────────────────────────────────────────────
   const { data: expeditionsData } = useSWR<{ items: ExpeditionSummary[] }>(
     expeditionKeys.mine({ page_size: 2, visibility: "PUBLIC" }),
@@ -89,8 +107,31 @@ export default function FeedView() {
   const trendingCommunities = communitiesData?.items ?? [];
   const upcomingExpeditions = expeditionsData?.items ?? [];
 
+  // Communities where the current user is a member — used in post composer
+  const myCommunities: CommunitySummary[] = useMemo(
+    () => (membershipsData?.communities ?? []).filter((c) => c.isMember === true),
+    [membershipsData]
+  );
+
   // Backend returns { posts: [...] } — use raw shape directly
   const rawPosts: RawPost[] = data?.posts ?? [];
+
+  // ── Batch-resolve author profiles ────────────────────────────────────────
+  // Collect unique author IDs from the current post list and resolve them in
+  // a single request.  Posts store author_id as the auth-service UUID (JWT sub).
+  // We use the /users/batch-profiles-by-auth endpoint so the map key matches
+  // post.authorId directly.
+  useEffect(() => {
+    if (rawPosts.length === 0) return;
+    const uniqueIds = [...new Set(rawPosts.map((p) => p.authorId))];
+    // Only fetch IDs not already in the map
+    const missing = uniqueIds.filter((id) => !(id in authorProfiles));
+    if (missing.length === 0) return;
+    batchProfilesByAuth(missing).then((map) => {
+      setAuthorProfiles((prev) => ({ ...prev, ...map }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawPosts]);
 
   // Apply filter + search
   const displayPosts = useMemo(() => {
@@ -123,6 +164,11 @@ export default function FeedView() {
     try {
       const post = await createPost(payload);
       showToast("Story published to feed!", "success");
+      // Revalidate SWR feed immediately.
+      await mutate();
+      // Invalidate the TanStack Query my-posts cache so Profile → My Posts
+      // reflects the new post on next visit.
+      await queryClient.invalidateQueries({ queryKey: ["feed", "me", "posts"] });
       return post.id;
     } catch {
       showToast("Failed to publish story. Please try again.", "error");
@@ -186,6 +232,9 @@ export default function FeedView() {
         },
         { revalidate: false }
       );
+      // Invalidate TanStack Query my-posts cache so Profile → My Posts is
+      // also up-to-date after a deletion.
+      await queryClient.invalidateQueries({ queryKey: ["feed", "me", "posts"] });
       showToast("Story deleted.", "info");
     } catch {
       showToast("Failed to delete story.", "error");
@@ -276,7 +325,7 @@ export default function FeedView() {
             user={user}
             onSubmit={handleCreatePost}
             onUploadComplete={handleUploadComplete}
-            communities={trendingCommunities}
+            communities={myCommunities}
           />
 
           {/* Post Cards */}
@@ -303,6 +352,7 @@ export default function FeedView() {
                       key={post.id}
                       post={post}
                       currentUserId={user?.id ?? null}
+                      authorProfile={authorProfiles[post.authorId] ?? null}
                       onEdit={handleEditPost}
                       onDelete={handleDeletePost}
                       onCopyLink={handleCopyLink}

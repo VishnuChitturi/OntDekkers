@@ -75,6 +75,32 @@ MIME_TO_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB — matches settings default
 
 
+async def _presign_media_url(object_name: Optional[str]) -> Optional[str]:
+    """
+    Convert a stored object_name (e.g. "avatars/{id}.jpg") into a browser-
+    accessible presigned URL.
+
+    Returns None if object_name is None or empty.
+    Returns the presigned URL on success.
+    On any S3/network error the exception is caught and None is returned so
+    a single bad media record never breaks an entire profile response.
+    """
+    if not object_name:
+        return None
+    # If it's already a full URL (e.g. a legacy direct URL), return as-is.
+    if object_name.startswith("http://") or object_name.startswith("https://"):
+        return object_name
+    try:
+        return await presigned_url(object_name, expires_hours=1)
+    except Exception as exc:
+        logger.warning(
+            "Failed to presign media URL for object '%s': %s",
+            object_name,
+            exc,
+        )
+        return None
+
+
 def _extract_auth_user_id(jwt_payload: Dict[str, Any]) -> uuid.UUID:
     """
     Safely extract the auth_user_id (UUID) from a validated JWT payload.
@@ -197,14 +223,21 @@ class UserService:
         fc = await self._followers.follower_count(profile.id)
         fic = await self._followers.following_count(profile.id)
 
+        # Presign avatar and cover URLs so the browser can load them.
+        # The DB stores object_name (e.g. "avatars/{id}.jpg") — NOT a URL.
+        # Presigned URLs are time-limited (1 hour); they are regenerated on
+        # every GET /users/me call so stale URLs never persist.
+        avatar_url = await _presign_media_url(profile.avatar_url)
+        cover_url = await _presign_media_url(profile.cover_url)
+
         return PrivateProfileResponse(
             id=profile.id,
             auth_user_id=profile.auth_user_id,
             username=profile.username,
             display_name=profile.display_name,
             bio=profile.bio,
-            avatar_url=profile.avatar_url,
-            cover_url=profile.cover_url,
+            avatar_url=avatar_url,
+            cover_url=cover_url,
             city=profile.city,
             country=profile.country,
             follower_count=fc,
@@ -282,13 +315,17 @@ class UserService:
                         )
         # --------------------------------------------------------------------
 
+        # Presign avatar and cover URLs so the browser can load them.
+        avatar_url = await _presign_media_url(profile.avatar_url)
+        cover_url = await _presign_media_url(profile.cover_url)
+
         return PublicProfileResponse(
             id=profile.id,
             username=profile.username,
             display_name=profile.display_name,
             bio=profile.bio,
-            avatar_url=profile.avatar_url,
-            cover_url=profile.cover_url,
+            avatar_url=avatar_url,
+            cover_url=cover_url,
             city=profile.city,
             country=profile.country,
             follower_count=fc,
@@ -327,19 +364,56 @@ class UserService:
         Uses a single DB query (SELECT ... WHERE id IN (...)).
         IDs not found are silently omitted; callers fall back to displaying
         the raw UUID if a profile is missing.
+        Avatar URLs are presigned so they are browser-accessible.
         """
         profiles = await self._profiles.get_by_ids(user_ids)
-        return BatchProfilesResponse(
-            profiles=[
+        summaries = []
+        for p in profiles:
+            avatar_url = await _presign_media_url(p.avatar_url)
+            summaries.append(
                 BatchProfileSummary(
                     id=p.id,
                     username=p.username,
                     display_name=p.display_name,
-                    avatar_url=p.avatar_url,
+                    avatar_url=avatar_url,
                 )
-                for p in profiles
-            ]
-        )
+            )
+        return BatchProfilesResponse(profiles=summaries)
+
+    async def batch_profiles_by_auth(
+        self,
+        auth_user_ids: List[uuid.UUID],
+    ) -> BatchProfilesResponse:
+        """
+        Return minimal public profile data for a list of auth-service user IDs.
+
+        Feed posts, community memberships, and other services store the JWT sub
+        claim (auth-service UUID) rather than the user-service profile UUID.
+        This method resolves those auth UUIDs → display identity in one query.
+
+        The returned BatchProfileSummary.id is the user-service profile UUID,
+        but the map key sent to the frontend is the auth_user_id so callers can
+        directly look up a post's author_id.
+
+        Uses a single DB query (SELECT ... WHERE auth_user_id IN (...)).
+        IDs not found are silently omitted.
+        Avatar URLs are presigned so they are browser-accessible.
+        """
+        profiles = await self._profiles.get_by_auth_user_ids(auth_user_ids)
+        summaries = []
+        for p in profiles:
+            avatar_url = await _presign_media_url(p.avatar_url)
+            # Use auth_user_id as the key id so the frontend can map
+            # post.authorId → profile without a secondary join.
+            summaries.append(
+                BatchProfileSummary(
+                    id=p.auth_user_id,
+                    username=p.username,
+                    display_name=p.display_name,
+                    avatar_url=avatar_url,
+                )
+            )
+        return BatchProfilesResponse(profiles=summaries)
 
     # ------------------------------------------------------------------
     # Update profile (PUT /users/me)
@@ -477,7 +551,8 @@ class UserService:
             if p:
                 summaries.append(FollowerSummary(
                     id=p.id, username=p.username,
-                    display_name=p.display_name, avatar_url=p.avatar_url,
+                    display_name=p.display_name,
+                    avatar_url=await _presign_media_url(p.avatar_url),
                 ))
         return PaginatedFollowersResponse(items=summaries, total=total, page=page, size=size)
 
@@ -496,7 +571,8 @@ class UserService:
             if p:
                 summaries.append(FollowerSummary(
                     id=p.id, username=p.username,
-                    display_name=p.display_name, avatar_url=p.avatar_url,
+                    display_name=p.display_name,
+                    avatar_url=await _presign_media_url(p.avatar_url),
                 ))
         return PaginatedFollowersResponse(items=summaries, total=total, page=page, size=size)
 

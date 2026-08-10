@@ -13,6 +13,7 @@
  *   - Interests list
  *   - Travel preferences summary
  *   - Reputation/badge summary
+ *   - My Posts (CP-POST-3)
  *
  * Uses TanStack Query for data fetching and cache invalidation.
  * Avatar and Cover uploads update the profile cache on success.
@@ -30,6 +31,7 @@ import {
   Award,
   Loader2,
   AlertTriangle,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,8 +42,11 @@ import {
   UPLOAD_MAX_BYTES,
   type PrivateProfileResponse,
 } from "@/services/users";
+import { getMyPosts } from "@/services/feedApi";
+import { feedKeys } from "@/services/cache/feedCache";
 import { ApiError } from "@/services/api";
 import { cn } from "@/lib/utils";
+import type { RawPost, RawPostListResponse } from "@/views/Feed/types";
 
 /** Stable TanStack Query key for the current user's private profile. */
 export const MY_PROFILE_KEY = ["profile", "me"] as const;
@@ -138,6 +143,189 @@ function ProfileError({ message }: { message: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// My Posts Section
+// ---------------------------------------------------------------------------
+
+/** A single post summary row displayed on the Profile page */
+function ProfilePostCard({ post }: { post: RawPost }) {
+  const formattedDate = new Date(post.createdAt).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return (
+    <article className="rounded-xl border border-[#EAE7DF] bg-white p-4 space-y-2 hover:border-gray-300 transition-colors">
+      {/* Cover image */}
+      {post.coverImageUrl && (
+        <div className="w-full h-32 overflow-hidden rounded-lg bg-[#EAE7DF]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={post.coverImageUrl}
+            alt={post.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        </div>
+      )}
+
+      {/* Title */}
+      <h3 className="text-sm font-semibold text-[#111111] leading-snug line-clamp-2">
+        {post.title}
+      </h3>
+
+      {/* Location */}
+      {post.location && (
+        <p className="flex items-center gap-1 text-[11px] font-mono uppercase tracking-wider text-gray-400">
+          <MapPin className="size-3" aria-hidden />
+          {post.location}
+        </p>
+      )}
+
+      {/* Tags */}
+      {post.tagList && post.tagList.length > 0 && (
+        <div className="flex flex-wrap gap-1" aria-label="Post tags">
+          {post.tagList.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-[#EAE7DF] bg-[#FBF9F4] px-2 py-0.5 text-[10px] text-gray-600"
+            >
+              {tag}
+            </span>
+          ))}
+          {post.tagList.length > 3 && (
+            <span className="rounded-full border border-[#EAE7DF] bg-[#FBF9F4] px-2 py-0.5 text-[10px] text-gray-600">
+              +{post.tagList.length - 3}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Meta row */}
+      <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
+        <div className="flex items-center gap-3">
+          <span>
+            {post.likeCount.toLocaleString()} {post.likeCount === 1 ? "like" : "likes"}
+          </span>
+          <span>
+            {post.commentCount.toLocaleString()} {post.commentCount === 1 ? "comment" : "comments"}
+          </span>
+        </div>
+        <span>{formattedDate}</span>
+      </div>
+
+      {/* Visibility badge */}
+      <div>
+        <span
+          className={cn(
+            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+            post.visibility === "PUBLIC"
+              ? "bg-green-50 text-green-700 border border-green-200"
+              : post.visibility === "COMMUNITY"
+                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                : "bg-gray-50 text-gray-600 border border-gray-200"
+          )}
+        >
+          {post.visibility === "PUBLIC"
+            ? "Global"
+            : post.visibility === "COMMUNITY"
+              ? "Community"
+              : "Private"}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+/** Posts section loading skeleton */
+function PostsSkeleton() {
+  return (
+    <div className="space-y-3" aria-label="Loading posts">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-[#EAE7DF] bg-white p-4 space-y-2">
+          <div className="h-4 w-3/4 animate-pulse rounded bg-[#EAE7DF]" />
+          <div className="h-3 w-1/2 animate-pulse rounded bg-[#EAE7DF]" />
+          <div className="h-3 w-1/4 animate-pulse rounded bg-[#EAE7DF]" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** My Posts section — fetches the authenticated user's own posts */
+function MyPostsSection() {
+  const {
+    data,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: feedKeys.myPosts({ limit: 20, offset: 0 }),
+    queryFn: () => getMyPosts({ limit: 20, offset: 0 }),
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  return (
+    <section aria-labelledby="my-posts-heading">
+      <div className="mb-3 flex items-center gap-2">
+        <FileText className="size-4 text-[#111111]" aria-hidden />
+        <h2
+          id="my-posts-heading"
+          className="text-sm font-semibold text-[#111111]"
+        >
+          My Posts
+        </h2>
+        {data && (
+          <span className="ml-auto text-xs text-gray-400">
+            {data.total} {data.total === 1 ? "post" : "posts"}
+          </span>
+        )}
+      </div>
+
+      {isLoading && <PostsSkeleton />}
+
+      {isError && (
+        <p className="text-sm text-gray-400 py-4 text-center">
+          Could not load posts. Please refresh.
+        </p>
+      )}
+
+      {!isLoading && !isError && data && data.posts.length === 0 && (
+        <div className="rounded-xl border border-dashed border-[#EAE7DF] bg-[#FBF9F4] p-8 text-center space-y-2">
+          <FileText className="size-8 mx-auto text-gray-300" aria-hidden />
+          <p className="text-sm font-medium text-gray-500">No posts yet.</p>
+          <p className="text-xs text-gray-400">
+            Share your first travel story with the community.
+          </p>
+          <Link
+            href="/feed"
+            className="inline-block mt-2 text-xs text-[#111111] underline underline-offset-4 hover:text-gray-600"
+          >
+            Go to Feed to create a story
+          </Link>
+        </div>
+      )}
+
+      {!isLoading && !isError && data && data.posts.length > 0 && (
+        <div className="space-y-3">
+          {data.posts.map((post) => (
+            <ProfilePostCard key={post.id} post={post} />
+          ))}
+          {data.hasMore && (
+            <p className="text-center text-xs text-gray-400 pt-1">
+              Showing {data.posts.length} of {data.total} posts.{" "}
+              <Link href="/feed" className="underline underline-offset-4 hover:text-gray-600">
+                See all in Feed
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main profile view
 // ---------------------------------------------------------------------------
 
@@ -148,7 +336,9 @@ function ProfileView({ profile }: { profile: PrivateProfileResponse }) {
   const avatarMutation = useMutation({
     mutationFn: (file: File) => uploadAvatar(file),
     onSuccess: (data) => {
-      // Optimistically update avatar_url in cache with the presigned URL
+      // Update the cache with the freshly returned presigned URL.
+      // The backend now also returns a presigned URL on GET /users/me, so
+      // after the next page load the URL will be regenerated correctly.
       queryClient.setQueryData<PrivateProfileResponse>(MY_PROFILE_KEY, (old) =>
         old ? { ...old, avatar_url: data.presigned_url } : old
       );
@@ -478,52 +668,13 @@ function ProfileView({ profile }: { profile: PrivateProfileResponse }) {
           </section>
         </>
       )}
+
+      {/* My Posts */}
+      <hr className="border-[#EAE7DF]" />
+      <MyPostsSection />
     </div>
   );
 }
-
-const MOCK_USER_PROFILE: PrivateProfileResponse = {
-  id: "prof-mock-1",
-  auth_user_id: "user-mock-1",
-  username: "explorer_alex",
-  display_name: "Alex Rivera",
-  bio: "Slow traveler, alpine trekker, and photography enthusiast. Currently exploring mountain passes across Europe.",
-  avatar_url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80",
-  cover_url: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80",
-  city: "Zurich",
-  country: "Switzerland",
-  follower_count: 142,
-  following_count: 89,
-  interests: [
-    { interest: "Alpine Hiking", created_at: "2024-01-01" },
-    { interest: "Landscape Photography", created_at: "2024-01-01" },
-    { interest: "Slow Travel", created_at: "2024-01-01" },
-  ],
-  preferences: {
-    travel_style: "Backpacking & Slow Travel",
-    budget: "Moderate",
-    adventure_level: "High",
-    languages: ["English", "German", "Spanish"],
-    preferred_destinations: ["Switzerland", "Norway", "Japan"],
-    notifications_enabled: true,
-    profile_public: true,
-  },
-  badges: [
-    { id: "b1", badge_name: "Verified Explorer", badge_icon: null, earned_at: "2024-01-15" },
-    { id: "b2", badge_name: "Summit Pioneer", badge_icon: null, earned_at: "2024-02-10" },
-  ],
-  reputation: {
-    explorer_score: 94,
-    community_score: 88,
-    review_score: 98,
-    expeditions_joined: 12,
-    expeditions_organized: 4,
-    guide_interactions: 8,
-    reviews_received: 15,
-  },
-  saved_items: [],
-  created_at: "2024-01-01",
-};
 
 // ---------------------------------------------------------------------------
 // Page export
@@ -533,6 +684,8 @@ export default function ProfilePage() {
   const {
     data: profile,
     isLoading,
+    isError,
+    error,
   } = useQuery({
     queryKey: MY_PROFILE_KEY,
     queryFn: getMyProfile,
@@ -542,5 +695,13 @@ export default function ProfilePage() {
 
   if (isLoading) return <ProfileSkeleton />;
 
-  return <ProfileView profile={profile ?? MOCK_USER_PROFILE} />;
+  if (isError || !profile) {
+    const message =
+      error instanceof ApiError
+        ? error.message
+        : "Could not load your profile. Please refresh the page.";
+    return <ProfileError message={message} />;
+  }
+
+  return <ProfileView profile={profile} />;
 }

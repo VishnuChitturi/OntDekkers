@@ -6,7 +6,7 @@ REST API endpoints for the Feed Service following the agreed API contract.
 
 import uuid
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import PostService, CommentService
@@ -41,12 +41,26 @@ def _user_id(payload: Dict[str, Any]) -> uuid.UUID:
 @router.post("/stories", response_model=PostSchema, status_code=status.HTTP_201_CREATED)
 async def create_post(
     request: PostCreateRequest,
+    authorization: Optional[str] = Header(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new travel post."""
+    """Create a new travel post.
+
+    Author is always derived from the JWT sub claim — never from the request body.
+
+    Visibility rules enforced by the service layer:
+      PUBLIC   → community_id must be null
+      COMMUNITY → community_id required; user must be an active member
+      PRIVATE  → community_id must be null
+    """
     service = PostService(db)
-    return await service.create_post(request, _user_id(current_user))
+    try:
+        return await service.create_post(request, _user_id(current_user), authorization)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 @router.get("/posts", response_model=PostListResponse)
@@ -59,10 +73,17 @@ async def list_posts(
     expedition_id: Optional[uuid.UUID] = Query(None),
     tags: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     current_user: Optional[Dict[str, Any]] = Depends(optional_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List posts with filtering and pagination."""
+    """List posts with filtering and pagination.
+
+    When the caller is authenticated the service layer automatically:
+    - Excludes the caller's own posts (own-post exclusion via JWT sub).
+    - Fetches the caller's community memberships and includes community posts
+      from those communities only.
+    """
     params = PostQueryParams(
         limit=limit,
         offset=offset,
@@ -74,7 +95,7 @@ async def list_posts(
     )
     service = PostService(db)
     user_id = _user_id(current_user) if current_user else None
-    return await service.list_posts(params, user_id)
+    return await service.list_posts(params, user_id, authorization)
 
 
 @router.get("/posts/{post_id}", response_model=PostSchema)
@@ -137,6 +158,34 @@ async def delete_post(
 # -------------------------------------------------------------------------
 # User-specific and Community-specific Post Endpoints
 # -------------------------------------------------------------------------
+
+@router.get("/me/posts", response_model=PostListResponse)
+async def get_my_posts(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the authenticated user's own posts (Global + Community).
+
+    Author identity is always derived from the JWT sub claim — the caller
+    cannot supply an arbitrary author_id through query parameters.
+
+    Returns all PUBLISHED posts authored by the current user, including:
+      - PUBLIC (Global) posts
+      - COMMUNITY posts
+
+    This endpoint is intended for the user's Profile → My Posts section.
+    It is distinct from GET /users/{user_id}/posts (public profile) in that:
+      - No viewer_id ambiguity: the JWT *is* the author.
+      - Returns the full own-view (same as viewer==author in get_posts_by_author).
+    """
+    author_id = _user_id(current_user)
+    service = PostService(db)
+    # Pass author_id as both the target author and current_user_id so the
+    # repository applies the "viewing own posts" path (shows all PUBLISHED posts).
+    return await service.get_posts_by_author(author_id, limit, offset, author_id)
+
 
 @router.get("/users/{user_id}/posts", response_model=PostListResponse)
 async def get_user_posts(

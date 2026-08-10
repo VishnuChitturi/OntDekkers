@@ -102,6 +102,21 @@ class BatchProfilesRequest(BaseModel):
     )
 
 
+class BatchProfilesByAuthRequest(BaseModel):
+    """POST /users/batch-profiles-by-auth — resolve profiles by auth-service UUIDs.
+
+    Feed, community, and other services store the JWT sub claim (auth-service UUID)
+    as their author/user reference.  This endpoint resolves those auth UUIDs to
+    the real display identity (username, display_name, avatar_url).
+    """
+    auth_user_ids: List[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="List of auth-service user IDs (JWT sub) to resolve (max 200)",
+    )
+
+
 # ===========================================================================
 # Response Schemas
 # ===========================================================================

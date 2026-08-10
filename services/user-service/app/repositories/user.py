@@ -76,6 +76,22 @@ class ProfileRepository:
         )
         return list(r.scalars().all())
 
+    async def get_by_auth_user_ids(self, auth_user_ids: List[uuid.UUID]) -> List[UserProfile]:
+        """Fetch multiple profiles by their auth_user_id in a single query.
+
+        Used when the caller holds auth-service UUIDs (the JWT sub claim) rather
+        than user-service profile UUIDs — e.g. feed posts, community memberships.
+        """
+        if not auth_user_ids:
+            return []
+        r = await self._s.execute(
+            select(UserProfile).where(
+                UserProfile.auth_user_id.in_(auth_user_ids),
+                UserProfile.is_deleted == False,  # noqa: E712
+            )
+        )
+        return list(r.scalars().all())
+
     async def create(
         self,
         auth_user_id: uuid.UUID,

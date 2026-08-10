@@ -9,6 +9,10 @@
  * Shared Container:
  *   Ensures consistent max-width, padding, spacing, and font hierarchy.
  *   Sidebar width (w-64) is strictly respected so main content never overlaps.
+ *
+ * Profile data is fetched via TanStack Query using the same MY_PROFILE_KEY as
+ * the profile page, so that cache updates from profile edits and image uploads
+ * are immediately reflected in the sidebar without a separate SWR revalidation.
  */
 
 import React, { useState } from "react";
@@ -24,11 +28,12 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import useSWR from "swr";
+import { useQuery } from "@tanstack/react-query";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { getMyProfile } from "@/services/users";
+import { MY_PROFILE_KEY } from "@/app/profile/page";
 import { cn } from "@/lib/utils";
 
 interface AppLayoutProps {
@@ -73,12 +78,16 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, isAuthenticated } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Fetch full user profile for sidebar display (only when authenticated)
-  const { data: profile } = useSWR(
-    isAuthenticated ? "/users/me" : null,
-    () => getMyProfile(),
-    { revalidateOnFocus: false }
-  );
+  // Fetch full user profile for sidebar display using the same TanStack Query
+  // key as the profile page (MY_PROFILE_KEY). This means cache updates from
+  // profile edits, username changes, and image uploads are immediately
+  // reflected here without a separate SWR revalidation cycle.
+  const { data: profile } = useQuery({
+    queryKey: MY_PROFILE_KEY,
+    queryFn: getMyProfile,
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  });
 
   // Resolve display values: prefer profile data, fall back to auth user email
   const displayName = profile?.display_name ?? profile?.username ?? user?.email ?? "";

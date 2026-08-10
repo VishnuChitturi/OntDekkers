@@ -16,6 +16,10 @@ class Settings(CommonSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_SECURE: bool = False
 
+    # Community Service — used for membership verification on COMMUNITY posts
+    # Docker Compose internal hostname; override via .env in production
+    COMMUNITY_SERVICE_URL: str = "http://community-service:8000"
+
     class Config:
         env_file = ".env"
         extra = "ignore"

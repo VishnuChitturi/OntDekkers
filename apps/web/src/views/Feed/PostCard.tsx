@@ -1,4 +1,5 @@
 "use client";
+"use client";
 
 /**
  * PostCard — Single post card with all interactions
@@ -33,6 +34,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { likePost, unlikePost, bookmarkPost, unbookmarkPost } from "@/services/feedApi";
 import { ImageCarousel } from "@/components/content/ImageCarousel";
 import { CommentsSection } from "./CommentsSection";
@@ -40,10 +42,16 @@ import { EditStoryModal } from "./EditStoryModal";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import type { RawPost } from "./types";
 import type { UpdatePostRequest } from "@/types";
+import type { BatchProfileSummary } from "@/services/users";
 
 interface PostCardProps {
   post: RawPost;
   currentUserId: string | null;
+  /** Resolved author profile from the user-service.  Null while loading or if the
+   *  profile cannot be found (user deleted etc.).  The component degrades gracefully
+   *  to a neutral avatar initial — it never generates a fake "Explorer #..." identity.
+   */
+  authorProfile: BatchProfileSummary | null;
   onEdit: (postId: string, payload: UpdatePostRequest) => Promise<void>;
   onDelete: (postId: string) => Promise<void>;
   onCopyLink: () => void;
@@ -52,6 +60,7 @@ interface PostCardProps {
 export function PostCard({
   post: initialPost,
   currentUserId,
+  authorProfile,
   onEdit,
   onDelete,
   onCopyLink,
@@ -64,6 +73,7 @@ export function PostCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const router = useRouter();
 
   const isOwner = currentUserId !== null && post.authorId === currentUserId;
 
@@ -166,16 +176,48 @@ export function PostCard({
         {/* Author Header */}
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="size-10 rounded-full bg-[#111111] text-white flex items-center justify-center font-bold text-sm shrink-0">
-              {post.authorId.charAt(0).toUpperCase()}
-            </div>
+            {/* Avatar — presigned URL when available, else initial letter */}
+            <button
+              type="button"
+              aria-label={authorProfile ? `View ${authorProfile.displayName}'s profile` : "View author profile"}
+              onClick={() => authorProfile && router.push(`/users/${authorProfile.username}`)}
+              className="size-10 rounded-full shrink-0 overflow-hidden focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[#111111]"
+            >
+              {authorProfile?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={authorProfile.avatarUrl}
+                  alt={authorProfile.displayName}
+                  className="size-10 rounded-full object-cover"
+                />
+              ) : (
+                <div className="size-10 rounded-full bg-[#111111] text-white flex items-center justify-center font-bold text-sm">
+                  {authorProfile
+                    ? authorProfile.displayName.charAt(0).toUpperCase()
+                    : "?"}
+                </div>
+              )}
+            </button>
+
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-[#111111]">
-                  Explorer #{post.authorId.slice(0, 8)}
-                </h2>
+                {/* Display name — clickable, navigates to /users/{username} */}
+                <button
+                  type="button"
+                  onClick={() => authorProfile && router.push(`/users/${authorProfile.username}`)}
+                  className={`text-sm font-bold text-[#111111] leading-tight ${authorProfile ? "hover:underline cursor-pointer" : "cursor-default"}`}
+                >
+                  {authorProfile ? authorProfile.displayName : "—"}
+                </button>
               </div>
               <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                {/* Username */}
+                {authorProfile && (
+                  <>
+                    <span className="text-gray-400">@{authorProfile.username}</span>
+                    <span>•</span>
+                  </>
+                )}
                 {post.location && (
                   <>
                     <span className="flex items-center gap-1 text-gray-400">

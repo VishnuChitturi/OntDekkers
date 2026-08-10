@@ -491,3 +491,43 @@ export async function batchProfiles(
   }
   return map;
 }
+
+/**
+ * Fetch minimal profile summaries by auth-service user IDs (JWT sub claim).
+ *
+ * Feed posts, community memberships, and other services store the JWT sub
+ * claim (auth-service UUID) as their author/user reference — NOT the
+ * user-service profile UUID.  Use this function when you have auth UUIDs.
+ *
+ * Uses POST /users/batch-profiles-by-auth — a single DB query.
+ * The returned map is keyed by auth_user_id so callers can look up
+ * post.authorId → profile directly.
+ * IDs with no matching profile are omitted from the map.
+ */
+export async function batchProfilesByAuth(
+  authUserIds: string[]
+): Promise<ProfileMap> {
+  if (authUserIds.length === 0) return {};
+  const unique = [...new Set(authUserIds)];
+  const response = await userHttp.post<{
+    profiles: Array<{
+      id: string;
+      username: string;
+      display_name: string;
+      avatar_url: string | null;
+    }>;
+  }>(
+    "/users/batch-profiles-by-auth",
+    { auth_user_ids: unique }
+  );
+  const map: ProfileMap = {};
+  for (const p of response.data.profiles) {
+    map[p.id] = {
+      id: p.id,
+      username: p.username,
+      displayName: p.display_name,
+      avatarUrl: p.avatar_url,
+    };
+  }
+  return map;
+}

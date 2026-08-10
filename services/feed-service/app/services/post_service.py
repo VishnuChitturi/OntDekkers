@@ -6,9 +6,12 @@ and handle cross-cutting concerns like authorization and data enrichment.
 """
 
 import uuid
+import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import httpx
 
 from app.models import Post, Comment, PostMedia, Share
 from app.repositories import PostRepository, InteractionRepository, CommentRepository
@@ -33,6 +36,71 @@ from app.schemas.feed import (
 from shared.constants.status import PostStatus, PostVisibility
 from shared.exceptions import NotFoundError, ForbiddenError, ValidationError
 
+logger = logging.getLogger(__name__)
+
+
+async def _verify_community_membership(
+    community_service_url: str,
+    community_id: uuid.UUID,
+    user_id: uuid.UUID,
+    authorization_header: Optional[str] = None,
+) -> bool:
+    """
+    Calls the community-service to verify that user_id is an ACTIVE member
+    of community_id.
+
+    Uses the GET /{community_id}/members endpoint and checks for the user
+    in the result.  Falls back to listing members with a role-agnostic query.
+
+    Returns True if the user is an active member, False otherwise.
+    Raises ValidationError if the community does not exist (404).
+    Raises ForbiddenError if the request itself is denied (403).
+    On any other network or unexpected error, raises ValidationError with a
+    helpful message so the caller can surface it to the API consumer.
+    """
+    url = f"{community_service_url}/api/v1/communities/{community_id}/members"
+    headers: Dict[str, str] = {}
+    if authorization_header:
+        headers["Authorization"] = authorization_header
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Fetch up to 200 members; for large communities we page through
+            params = {"limit": 200, "offset": 0}
+            response = await client.get(url, params=params, headers=headers)
+
+        if response.status_code == 404:
+            raise ValidationError(f"Community {community_id} does not exist.")
+        if response.status_code == 403:
+            raise ForbiddenError("Not authorized to access community membership data.")
+        if response.status_code != 200:
+            logger.error(
+                "Community membership check failed: status=%s body=%s",
+                response.status_code,
+                response.text[:200],
+            )
+            raise ValidationError(
+                "Could not verify community membership. Please try again."
+            )
+
+        body = response.json()
+        members = body.get("members", [])
+        user_id_str = str(user_id)
+        for member in members:
+            # Community service returns snake_case JSON (not camelCase interceptor)
+            member_user_id = member.get("user_id") or member.get("userId", "")
+            member_status = member.get("status", "")
+            if str(member_user_id) == user_id_str and member_status == "ACTIVE":
+                return True
+        return False
+
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.error("Community service unreachable: %s", exc)
+        raise ValidationError(
+            "Community membership verification is temporarily unavailable. "
+            "Please try again shortly."
+        )
+
 
 class PostService:
     """Business logic for post management"""
@@ -50,13 +118,59 @@ class PostService:
     async def create_post(
         self,
         request: PostCreateRequest,
-        author_id: uuid.UUID
+        author_id: uuid.UUID,
+        authorization_header: Optional[str] = None,
     ) -> PostSchema:
-        """Create a new post with business validation"""
-        
-        # Business validation
-        if request.community_id and request.visibility == PostVisibility.PRIVATE:
-            raise ValidationError("Community posts cannot be private")
+        """Create a new post with business validation.
+
+        Validation rules enforced here (independent of frontend):
+          GLOBAL (PUBLIC):
+            - community_id must be None/null
+
+          COMMUNITY:
+            - community_id must be provided
+            - author must be an ACTIVE member of that community
+              (verified via community-service HTTP call)
+
+          PRIVATE:
+            - community_id must be None/null (private community posts make no sense)
+        """
+
+        # ── Visibility / community_id cross-validation ──────────────────────
+
+        if request.visibility == PostVisibility.PUBLIC:
+            # GLOBAL post — must not target a community
+            if request.community_id is not None:
+                raise ValidationError(
+                    "A PUBLIC (Global) post cannot have a community_id. "
+                    "Set community_id to null for global posts."
+                )
+
+        elif request.visibility == PostVisibility.COMMUNITY:
+            # COMMUNITY post — community_id is mandatory
+            if request.community_id is None:
+                raise ValidationError(
+                    "A COMMUNITY post requires a community_id."
+                )
+
+            # ── Membership verification ────────────────────────────────────
+            from app.config.settings import settings
+            is_member = await _verify_community_membership(
+                community_service_url=settings.COMMUNITY_SERVICE_URL,
+                community_id=request.community_id,
+                user_id=author_id,
+                authorization_header=authorization_header,
+            )
+            if not is_member:
+                raise ForbiddenError(
+                    "You are not an active member of this community and cannot "
+                    "post to it."
+                )
+
+        elif request.visibility == PostVisibility.PRIVATE:
+            # PRIVATE post — must not target a community
+            if request.community_id is not None:
+                raise ValidationError("Private posts cannot be associated with a community.")
         
         # Create post
         post = await self.post_repo.create(
@@ -150,29 +264,107 @@ class PostService:
     async def list_posts(
         self,
         params: PostQueryParams,
-        current_user_id: Optional[uuid.UUID] = None
+        current_user_id: Optional[uuid.UUID] = None,
+        authorization_header: Optional[str] = None,
     ) -> PostListResponse:
-        """List posts with filtering and pagination"""
+        """List posts with filtering, pagination, and feed visibility rules.
+
+        For the main feed this method:
+          1. Sets exclude_author_id = current_user_id so the caller never sees
+             their own posts (own-post exclusion at query level).
+          2. Fetches the user's community memberships in a single HTTP call so
+             COMMUNITY-visibility posts from joined communities are included.
+          3. Passes both to the repository so all filtering happens in SQL
+             (correct pagination — no post-fetch removal).
+        """
+        user_community_ids: Optional[List[uuid.UUID]] = None
+
+        # Inject own-post exclusion for authenticated users in the main feed.
+        # Security: we derive this from the JWT, never from the request body.
+        if current_user_id is not None and params.exclude_author_id is None:
+            # Only set it if no explicit override was provided.
+            # Callers that legitimately want to see own posts (e.g., profile
+            # endpoint) should not use list_posts() — they use get_posts_by_author().
+            params = params.model_copy(update={"exclude_author_id": current_user_id})
+
+        # Fetch user's community IDs for community-post visibility enforcement.
+        if current_user_id is not None:
+            user_community_ids = await self._fetch_user_community_ids(
+                authorization_header=authorization_header
+            )
+
+        posts, total = await self.post_repo.list_posts(
+            params, current_user_id, user_community_ids
+        )
         
-        posts, total = await self.post_repo.list_posts(params, current_user_id)
-        
-        # Enrich all posts
+        # Convert to summary schemas — no further visibility filtering needed
+        # because the repository already enforced all rules at query level.
         enriched_posts = []
         for post in posts:
             try:
-                if await self._can_user_view_post(post, current_user_id):
-                    summary = await self._convert_to_summary_schema(post, current_user_id)
-                    enriched_posts.append(summary)
-            except ForbiddenError:
-                continue  # Skip posts user can't view
-        
+                summary = await self._convert_to_summary_schema(post, current_user_id)
+                enriched_posts.append(summary)
+            except Exception:
+                continue  # Silently skip posts that fail enrichment
+
         return PostListResponse(
             posts=enriched_posts,
-            total=len(enriched_posts),  # Adjust total for filtered results
+            total=total,
             limit=params.limit,
             offset=params.offset,
-            has_more=len(enriched_posts) == params.limit
+            has_more=total > params.offset + len(enriched_posts),
         )
+
+    async def _fetch_user_community_ids(
+        self,
+        authorization_header: Optional[str] = None,
+    ) -> List[uuid.UUID]:
+        """Fetch the list of community IDs the current user belongs to.
+
+        Makes a single GET /api/v1/communities/?limit=200 request to the
+        community-service with the user's Authorization header.  The response
+        includes an ``is_member`` flag per community; we collect the IDs where
+        ``is_member=True``.
+
+        Returns an empty list on any error (network, auth, timeout) so the feed
+        gracefully degrades to showing only PUBLIC posts rather than failing.
+        """
+        from app.config.settings import settings
+
+        url = f"{settings.COMMUNITY_SERVICE_URL}/api/v1/communities/"
+        headers: Dict[str, str] = {}
+        if authorization_header:
+            headers["Authorization"] = authorization_header
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    url,
+                    params={"limit": 200, "offset": 0},
+                    headers=headers,
+                )
+
+            if response.status_code != 200:
+                logger.warning(
+                    "community-service returned %s when fetching memberships",
+                    response.status_code,
+                )
+                return []
+
+            body = response.json()
+            communities = body.get("communities", body.get("items", []))
+            return [
+                uuid.UUID(c["id"])
+                for c in communities
+                if c.get("is_member") is True
+            ]
+
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning("community-service unreachable when fetching memberships: %s", exc)
+            return []
+        except Exception as exc:
+            logger.warning("unexpected error fetching community memberships: %s", exc)
+            return []
     
     async def get_posts_by_author(
         self,

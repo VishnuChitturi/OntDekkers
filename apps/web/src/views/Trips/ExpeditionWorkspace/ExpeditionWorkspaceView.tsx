@@ -16,7 +16,7 @@
  *   - Trip detail:         GET /api/v1/trips/{id}                              → Trip
  *   - My participant:      GET /api/v1/trips/{id}/me/participant               → TripParticipant | null
  *   - Participants:        GET /expeditions/api/v1/expeditions/{id}/participants → TripParticipant[]
- *   - User profiles:       POST /users/batch-profiles (user-service)           → ProfileMap
+ *   - User profiles:       POST /users/batch-profiles-by-auth (user-service) → ProfileMap
  *   - Gallery:             GET /expeditions/api/v1/expeditions/{id}/gallery    → GalleryResponse
  *   - Gear:                GET /expeditions/api/v1/expeditions/{id}/gear       → GearResponse
  *
@@ -64,7 +64,7 @@ import { swrFetcher, expeditionKeys, tripKeys } from "@/services/cache";
 import { useRouter, useParams } from "next/navigation";
 import { useToast } from "@/hooks/useToast";
 import { useAuth } from "@/contexts/AuthContext";
-import { batchProfiles, type ProfileMap } from "@/services/users";
+import { batchProfilesByAuth, type ProfileMap } from "@/services/users";
 import { joinTrip, deleteTrip } from "@/services/tripsApi";
 import { ApiError } from "@/services/api";
 
@@ -453,6 +453,11 @@ function GalleryTab({ expeditionId }: { expeditionId: string }) {
 // ---------------------------------------------------------------------------
 // Tab: Members
 // Fetches participants, then batch-resolves real user profiles from user-service.
+//
+// Identity resolution:
+//   expedition_participants.user_id == JWT sub claim (auth-service UUID).
+//   Must use batchProfilesByAuth() — NOT batchProfiles() — because the
+//   latter expects user-service profile UUIDs, which are different.
 // ---------------------------------------------------------------------------
 
 function MembersTab({
@@ -462,22 +467,26 @@ function MembersTab({
   expeditionId: string;
   trip: Trip;
 }) {
+  const router = useRouter();
+
   const { data: participants, isLoading } = useSWR<TripParticipant[]>(
     expeditionKeys.participants(expeditionId),
     swrFetcher,
     { revalidateOnFocus: false }
   );
 
-  // Real user profiles fetched from user-service via POST /users/batch-profiles
+  // Real user profiles fetched from user-service via POST /users/batch-profiles-by-auth.
+  // The participant user_id is the JWT sub claim (auth UUID), so we use the
+  // auth-keyed batch endpoint — the returned map is keyed by auth_user_id.
   const [profileMap, setProfileMap] = useState<ProfileMap>({});
   const [profilesLoading, setProfilesLoading] = useState(false);
 
   useEffect(() => {
     if (!participants || participants.length === 0) return;
 
-    const userIds = participants.map((p) => p.user_id);
+    const authUserIds = participants.map((p) => p.user_id);
     setProfilesLoading(true);
-    batchProfiles(userIds)
+    batchProfilesByAuth(authUserIds)
       .then((map) => setProfileMap(map))
       .catch(() => {
         // If user-service is unavailable, degrade gracefully — show neutral fallback
@@ -518,6 +527,17 @@ function MembersTab({
    */
   function avatarUrl(participant: TripParticipant): string | null {
     return profileMap[participant.user_id]?.avatarUrl ?? null;
+  }
+
+  /**
+   * Navigate to the public profile page for this participant.
+   * Only navigates when a username is available from the profile map.
+   */
+  function handleProfileClick(participant: TripParticipant): void {
+    const username = profileMap[participant.user_id]?.username;
+    if (username) {
+      router.push(`/users/${username}`);
+    }
   }
 
   const loading = isLoading || profilesLoading;
@@ -571,15 +591,44 @@ function MembersTab({
         </span>
       </h4>
       <div className="divide-y divide-gray-100">
-        {memberList.map((m) => (
-          <div key={m.id} className="py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Avatar src={avatarUrl(m)} alt={displayName(m)} size="sm" />
-              <span className="text-sm font-medium text-ink">{displayName(m)}</span>
+        {memberList.map((m) => {
+          const username = profileMap[m.user_id]?.username;
+          const isClickable = !!username;
+          return (
+            <div
+              key={m.id}
+              className={`py-3 flex items-center justify-between ${
+                isClickable
+                  ? "cursor-pointer hover:bg-gray-50 rounded-xl px-2 -mx-2 transition-colors"
+                  : ""
+              }`}
+              onClick={isClickable ? () => handleProfileClick(m) : undefined}
+              role={isClickable ? "button" : undefined}
+              tabIndex={isClickable ? 0 : undefined}
+              onKeyDown={
+                isClickable
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleProfileClick(m);
+                      }
+                    }
+                  : undefined
+              }
+              aria-label={
+                isClickable
+                  ? `View profile of ${displayName(m)}`
+                  : undefined
+              }
+            >
+              <div className="flex items-center gap-3">
+                <Avatar src={avatarUrl(m)} alt={displayName(m)} size="sm" />
+                <span className="text-sm font-medium text-ink">{displayName(m)}</span>
+              </div>
+              <span className="text-xs font-mono text-muted-slate">{roleLabel(m.role)}</span>
             </div>
-            <span className="text-xs font-mono text-muted-slate">{roleLabel(m.role)}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </motion.div>
   );

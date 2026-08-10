@@ -95,17 +95,13 @@ class TestCreatePost:
         assert resp.status_code == 422
 
     @pytest.mark.integration
-    async def test_create_post_community_private_returns_422(self, auth_client):
-        """community_id + PRIVATE visibility is rejected with HTTP 422 (business rule).
+    async def test_create_post_community_private_returns_400(self, auth_client):
+        """community_id + PRIVATE visibility is rejected with HTTP 400 (business rule).
 
-        The create_post handler does not have a try/except ValidationError block,
-        so the shared.exceptions.ValidationError raised by the service propagates
-        to the global OntDekkerException handler which returns ValidationException
-        .status_code == 422 (Unprocessable Entity).
-
-        Note: update_post and delete_post handlers DO explicitly catch ValidationError
-        and re-raise as HTTPException(400). The create_post handler is missing this
-        pattern — this is a production inconsistency but is not fixed here.
+        The create_post handler now has an explicit try/except ValidationError block
+        that converts the service-layer ValidationError → HTTPException(400).
+        This aligns with update_post and delete_post which also return 400 for
+        business-rule violations.
         """
         resp = await auth_client.post(
             "/api/v1/feed/posts",
@@ -114,7 +110,31 @@ class TestCreatePost:
                 visibility="PRIVATE",
             ),
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400
+
+    @pytest.mark.integration
+    async def test_create_post_public_with_community_id_returns_400(self, auth_client):
+        """PUBLIC (Global) post with a community_id is rejected with HTTP 400."""
+        resp = await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(
+                community_id=uuid.uuid4(),
+                visibility="PUBLIC",
+            ),
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.integration
+    async def test_create_post_community_without_community_id_returns_400(self, auth_client):
+        """COMMUNITY post without a community_id is rejected with HTTP 400."""
+        resp = await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(
+                community_id=None,
+                visibility="COMMUNITY",
+            ),
+        )
+        assert resp.status_code == 400
 
     @pytest.mark.integration
     async def test_create_post_invalid_bearer_returns_401(self, client):
@@ -225,13 +245,19 @@ class TestListPosts:
     @pytest.mark.integration
     async def test_list_posts_community_filter(self, auth_client, client):
         community_id = uuid.uuid4()
-        await auth_client.post(
+        # Create the community post as a *different* user so the TEST_USER_ID
+        # (auth_client) can see it on GET — the service excludes the requesting
+        # user's own posts from the general feed (own-post exclusion).
+        other_headers = build_auth_headers(user_id=uuid.uuid4())
+        await client.post(
             "/api/v1/feed/posts",
-            json=make_post_payload(title="InCommunity", community_id=community_id),
+            json=make_post_payload(title="InCommunity", community_id=community_id, visibility="COMMUNITY"),
+            headers=other_headers,
         )
         await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="NoCommunity"))
 
-        resp = await client.get(f"/api/v1/feed/posts?community_id={community_id}")
+        # Use auth_client for GET — COMMUNITY posts are only visible to authenticated users
+        resp = await auth_client.get(f"/api/v1/feed/posts?community_id={community_id}")
         body = resp.json()
         assert body["total"] == 1
         assert body["posts"][0]["title"] == "InCommunity"
@@ -404,12 +430,18 @@ class TestUpdatePost:
 
     @pytest.mark.integration
     async def test_update_post_community_private_returns_400(self, auth_client):
-        """Setting PRIVATE on a community post returns HTTP 400."""
+        """Setting PRIVATE on a community post returns HTTP 400.
+
+        Creates a COMMUNITY post first, then attempts to update its visibility
+        to PRIVATE which should be rejected.
+        """
         community_id = uuid.uuid4()
+        # Create a valid COMMUNITY post (membership check mocked to True in conftest)
         create_resp = await auth_client.post(
             "/api/v1/feed/posts",
-            json=make_post_payload(community_id=community_id, visibility="PUBLIC"),
+            json=make_post_payload(community_id=community_id, visibility="COMMUNITY"),
         )
+        assert create_resp.status_code == 201, f"Setup failed: {create_resp.json()}"
         post_id = create_resp.json()["id"]
 
         resp = await auth_client.put(
@@ -575,8 +607,8 @@ class TestGetCommunityPosts:
     @pytest.mark.integration
     async def test_get_community_posts_returns_community_posts(self, auth_client, client):
         community_id = uuid.uuid4()
-        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="In Community", community_id=community_id))
-        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="Also In Community", community_id=community_id))
+        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="In Community", community_id=community_id, visibility="COMMUNITY"))
+        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="Also In Community", community_id=community_id, visibility="COMMUNITY"))
         await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="No Community"))
 
         resp = await client.get(f"/api/v1/feed/communities/{community_id}/posts")
@@ -592,7 +624,7 @@ class TestGetCommunityPosts:
     @pytest.mark.integration
     async def test_get_community_posts_response_schema(self, auth_client, client):
         community_id = uuid.uuid4()
-        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(community_id=community_id))
+        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(community_id=community_id, visibility="COMMUNITY"))
 
         resp = await client.get(f"/api/v1/feed/communities/{community_id}/posts")
         body = resp.json()
@@ -604,7 +636,7 @@ class TestGetCommunityPosts:
     async def test_get_community_posts_pagination_limit(self, auth_client, client):
         community_id = uuid.uuid4()
         for i in range(4):
-            await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title=f"P{i}", community_id=community_id))
+            await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title=f"P{i}", community_id=community_id, visibility="COMMUNITY"))
 
         resp = await client.get(f"/api/v1/feed/communities/{community_id}/posts?limit=2")
         assert len(resp.json()["posts"]) == 2
@@ -612,7 +644,204 @@ class TestGetCommunityPosts:
     @pytest.mark.integration
     async def test_get_community_posts_no_auth_required(self, auth_client, client):
         community_id = uuid.uuid4()
-        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(community_id=community_id))
+        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(community_id=community_id, visibility="COMMUNITY"))
 
         resp = await client.get(f"/api/v1/feed/communities/{community_id}/posts")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/feed/me/posts  (CP-POST-3)
+# ---------------------------------------------------------------------------
+
+class TestGetMyPosts:
+    """GET /api/v1/feed/me/posts
+
+    Verifies the authenticated-user-only My Posts endpoint introduced in
+    CP-POST-3.  The JWT sub claim is the authoritative author identity — the
+    caller cannot supply an arbitrary author_id to retrieve another user's
+    posts.
+    """
+
+    @pytest.mark.integration
+    async def test_get_my_posts_requires_authentication(self, client):
+        """Unauthenticated requests must be rejected with 401."""
+        resp = await client.get("/api/v1/feed/me/posts")
+        assert resp.status_code == 401
+
+    @pytest.mark.integration
+    async def test_get_my_posts_returns_200_when_authenticated(self, auth_client):
+        """Authenticated requests return 200 OK."""
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        assert resp.status_code == 200
+
+    @pytest.mark.integration
+    async def test_get_my_posts_response_schema(self, auth_client):
+        """Response contains the expected PostListResponse shape."""
+        await auth_client.post("/api/v1/feed/posts", json=make_post_payload(title="Schema Check"))
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        assert "posts" in body
+        assert "total" in body
+        assert "limit" in body
+        assert "offset" in body
+        assert "has_more" in body
+
+    @pytest.mark.integration
+    async def test_get_my_posts_returns_global_post(self, auth_client):
+        """Test 1: User A creates a Global (PUBLIC) post → My Posts returns it."""
+        await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(title="Global Post A", visibility="PUBLIC"),
+        )
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        assert body["total"] >= 1
+        titles = [p["title"] for p in body["posts"]]
+        assert "Global Post A" in titles
+
+    @pytest.mark.integration
+    async def test_get_my_posts_returns_community_post(self, auth_client):
+        """Test 2: User A creates a COMMUNITY post → My Posts returns it."""
+        community_id = uuid.uuid4()
+        await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(
+                title="Community Post A",
+                visibility="COMMUNITY",
+                community_id=community_id,
+            ),
+        )
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        titles = [p["title"] for p in body["posts"]]
+        assert "Community Post A" in titles
+
+    @pytest.mark.integration
+    async def test_get_my_posts_returns_both_global_and_community(self, auth_client):
+        """Test 3: User A creates both Global and Community posts → both returned."""
+        community_id = uuid.uuid4()
+        await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(title="Global A", visibility="PUBLIC"),
+        )
+        await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(
+                title="Community A",
+                visibility="COMMUNITY",
+                community_id=community_id,
+            ),
+        )
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        assert body["total"] >= 2
+        titles = [p["title"] for p in body["posts"]]
+        assert "Global A" in titles
+        assert "Community A" in titles
+
+    @pytest.mark.integration
+    async def test_get_my_posts_excludes_other_users_posts(self, auth_client, client):
+        """Test 4: User A's My Posts does not include User B's posts."""
+        other_headers = build_auth_headers(user_id=uuid.uuid4())
+        # User B creates a post
+        await client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(title="User B Post"),
+            headers=other_headers,
+        )
+        # User A creates a post
+        await auth_client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(title="User A Post"),
+        )
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        # All returned posts must belong to User A (TEST_USER_ID)
+        assert all(p["author_id"] == str(TEST_USER_ID) for p in body["posts"])
+        # User B's title must not appear
+        titles = [p["title"] for p in body["posts"]]
+        assert "User B Post" not in titles
+
+    @pytest.mark.integration
+    async def test_get_my_posts_empty_when_no_posts(self, auth_client):
+        """Test 5: User with no posts gets an empty paginated result."""
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["posts"] == []
+        assert body["has_more"] is False
+
+    @pytest.mark.integration
+    async def test_get_my_posts_cannot_use_query_param_to_get_other_user(self, auth_client, client):
+        """Test 7: author_id query param cannot override JWT identity.
+
+        Passing an arbitrary author_id as a query parameter must NOT cause the
+        endpoint to return that user's posts.  The endpoint ignores all
+        author-id-style query parameters — only the JWT sub is used.
+        """
+        other_id = uuid.uuid4()
+        other_headers = build_auth_headers(user_id=other_id)
+        # Other user creates a post
+        await client.post(
+            "/api/v1/feed/posts",
+            json=make_post_payload(title="Should Not Appear"),
+            headers=other_headers,
+        )
+        # Current user (TEST_USER_ID) calls /me/posts with other user's id
+        resp = await auth_client.get(
+            "/api/v1/feed/me/posts",
+            params={"author_id": str(other_id)},  # should be ignored
+        )
+        body = resp.json()
+        # The endpoint does not accept author_id — result is USER_A's posts only
+        titles = [p["title"] for p in body["posts"]]
+        assert "Should Not Appear" not in titles
+
+    @pytest.mark.integration
+    async def test_get_my_posts_pagination_limit(self, auth_client):
+        """Pagination: limit parameter restricts result count."""
+        for i in range(5):
+            await auth_client.post(
+                "/api/v1/feed/posts",
+                json=make_post_payload(title=f"Paginated Post {i}"),
+            )
+        resp = await auth_client.get("/api/v1/feed/me/posts?limit=3")
+        body = resp.json()
+        assert len(body["posts"]) == 3
+        assert body["total"] == 5
+        assert body["has_more"] is True
+
+    @pytest.mark.integration
+    async def test_get_my_posts_pagination_offset(self, auth_client):
+        """Pagination: offset parameter skips earlier posts."""
+        for i in range(4):
+            await auth_client.post(
+                "/api/v1/feed/posts",
+                json=make_post_payload(title=f"Offset Post {i}"),
+            )
+        resp = await auth_client.get("/api/v1/feed/me/posts?limit=2&offset=2")
+        body = resp.json()
+        assert len(body["posts"]) == 2
+        assert body["total"] == 4
+
+    @pytest.mark.integration
+    async def test_get_my_posts_all_posts_authored_by_jwt_user(self, auth_client):
+        """All returned posts have author_id equal to the JWT sub (TEST_USER_ID)."""
+        for i in range(3):
+            await auth_client.post(
+                "/api/v1/feed/posts",
+                json=make_post_payload(title=f"Mine {i}"),
+            )
+        resp = await auth_client.get("/api/v1/feed/me/posts")
+        body = resp.json()
+        assert all(p["author_id"] == str(TEST_USER_ID) for p in body["posts"])
+
+    @pytest.mark.integration
+    async def test_get_my_posts_invalid_bearer_returns_401(self, client):
+        """Invalid/expired token is rejected with 401."""
+        resp = await client.get(
+            "/api/v1/feed/me/posts",
+            headers={"Authorization": "Bearer not-a-valid-token"},
+        )
+        assert resp.status_code == 401
